@@ -1,19 +1,33 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"time"
+	"log"
+
+	"ChatServer/config"
+	"ChatServer/pkg/logger"
+
+	"go.uber.org/zap"
 )
 
+// main 演示最基本的日志初始化与输出。
+// 运行：go run main.go
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello, Docker! Current time: %s", time.Now().Format(time.RFC3339))
-	})
+	// 使用默认配置（json + stdout/stderr）。
+	cfg := config.DefaultLoggerConfig()
 
-	fmt.Println("Server starting on :8080...")
-	// 这是一个阻塞调用，会防止 main 函数退出，从而保持容器运行
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Printf("Server failed to start: %v\n", err)
+	// 构建 logger。
+	lg, err := logger.Build(cfg)
+	if err != nil {
+		log.Fatalf("build logger failed: %v", err)
 	}
+	defer lg.Sync()
+
+	// 替换全局实例，方便 zap.L()/zap.S() 使用。
+	logger.ReplaceGlobal(lg)
+
+	// 示例日志。
+	logger.L().Info("service started", zap.String("MID","1234567890"),zap.String("env", "dev"))
+	logger.L().Warn("sample warning", zap.String("MID","1234567890"),zap.String("module", "logger"))
+	logger.L().Error("sample error", zap.String("MID","1234567890"),zap.String("module", "logger"))
 }
+
