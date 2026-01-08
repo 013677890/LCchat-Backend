@@ -2,7 +2,8 @@ package router
 
 import (
 	"ChatServer/apps/gateway/internal/middleware"
-
+	v1 "ChatServer/apps/gateway/internal/router/v1"
+	"ChatServer/pkg/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +19,9 @@ func InitRouter() *gin.Engine {
 	// 跨域中间件
 	r.Use(middleware.CorsMiddleware())
 
+	// 追踪中间件 (生成 trace_id)
+	r.Use(util.TraceLogger())
+
 	// 健康检查（无需认证）
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -31,17 +35,15 @@ func InitRouter() *gin.Engine {
 		// 公开接口（不需要认证）
 		public := api.Group("/public")
 		{
-
+			// 登录接口
+			public.POST("/login", v1.Login)
 		}
 
 		// 需要认证的接口
-		auth := api.Group("/auth")
+		_ = api.Group("/auth")
 		//auth.Use(middleware.JWTAuthMiddleware()) // 应用 JWT 认证中间件  测试环境下不启用
-		{
-
-		}
+		// TODO: 添加需要认证的接口
 	}
 
 	return r
 }
-

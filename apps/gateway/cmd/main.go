@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ChatServer/apps/gateway/internal/pb"
 	"ChatServer/apps/gateway/internal/router"
 	"ChatServer/config"
 	"ChatServer/pkg/logger"
@@ -36,7 +37,21 @@ func main() {
 
 	logger.Info(ctx, "Gateway service initializing...")
 
-	// 2. 初始化路由
+	// 2. 初始化用户服务gRPC客户端
+	// TODO: 从配置文件读取user服务地址
+	userServiceAddr := "localhost:9090"
+	if err := pb.InitUserServiceClient(userServiceAddr); err != nil {
+		logger.Error(ctx, "Failed to initialize user service gRPC client", logger.ErrorField("error", err))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := pb.CloseUserServiceClient(); err != nil {
+			logger.Error(ctx, "Failed to close user service gRPC client", logger.ErrorField("error", err))
+		}
+	}()
+
+	// 3. 初始化路由
+	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
 	gin.SetMode(gin.ReleaseMode)
 	r := router.InitRouter()
 
