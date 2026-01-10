@@ -6,6 +6,7 @@ import (
 	"ChatServer/pkg/util"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // InitRouter 初始化路由
@@ -15,6 +16,9 @@ func InitRouter() *gin.Engine {
 	// 基础中间件 (使用自定义的日志和恢复中间件)
 	r.Use(middleware.GinLogger())
 	r.Use(middleware.GinRecovery(true))
+
+	// Prometheus 监控中间件（必须在其他中间件之前，以记录所有请求）
+	r.Use(middleware.PrometheusMiddleware())
 
 	// 跨域中间件
 	r.Use(middleware.CorsMiddleware())
@@ -28,6 +32,10 @@ func InitRouter() *gin.Engine {
 			"status": "ok",
 		})
 	})
+
+	// Prometheus 指标暴露接口
+	// Prometheus 会定时访问这个接口来拉取监控数据
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// API 路由组
 	api := r.Group("/api/v1")

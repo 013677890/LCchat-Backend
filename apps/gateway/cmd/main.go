@@ -70,7 +70,7 @@ func main() {
 
 	// 5. 配置服务器
 	port := 8080 // TODO: 从配置文件读取
-	addr := fmt.Sprintf(":%d", port)
+	addr := "127.0.0.1:" + fmt.Sprintf("%d", port)
 
 	srv := &http.Server{
 		Addr:           addr,

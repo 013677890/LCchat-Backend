@@ -4,6 +4,9 @@ import (
 	userpb "ChatServer/apps/user/pb"
 	"context"
 	"fmt"
+	"time"
+
+	"ChatServer/apps/gateway/internal/middleware"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -84,8 +87,16 @@ func Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse
 		return nil, fmt.Errorf("user service client not initialized")
 	}
 
+	// 记录 gRPC 调用开始时间，用于计算耗时
+	start := time.Now()
+
 	// gRPC 会自动应用重试策略，无需手动重试
 	resp, err := client.Login(ctx, req)
+
+	// 计算耗时并记录到 Prometheus 指标
+	duration := time.Since(start).Seconds()
+	middleware.RecordGRPCRequest("user.UserService", "Login", duration, err)
+
 	if err != nil {
 		return nil, err
 	}
