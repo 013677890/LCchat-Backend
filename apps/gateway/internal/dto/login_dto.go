@@ -2,8 +2,8 @@ package dto
 
 // LoginRequest 登录请求 DTO
 type LoginRequest struct {
-	Telephone  string     `json:"telephone" binding:"required"` // 手机号
-	Password   string     `json:"password" binding:"required"`  // 密码(加密后)
+	Telephone  string     `json:"telephone" binding:"required,len=11"` // 手机号
+	Password   string     `json:"password" binding:"required,min=8,max=16"`  // 密码
 	DeviceInfo DeviceInfo `json:"deviceInfo"`                   // 设备信息
 }
 

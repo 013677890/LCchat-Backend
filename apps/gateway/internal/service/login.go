@@ -25,7 +25,7 @@ func Login(ctx context.Context, req *dto.LoginRouterToService, deviceId string) 
 		Password:  req.Password,
 	}
 
-	grpcResp, err := pb.LoginWithRetry(ctx, grpcReq, 3)
+	grpcResp, err := pb.Login(ctx, grpcReq)
 	if err != nil {
 		// 所有重试失败，记录错误日志并返回
 		logger.Error(ctx, "调用用户服务 gRPC 失败",

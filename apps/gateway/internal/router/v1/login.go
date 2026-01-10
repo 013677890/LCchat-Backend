@@ -38,20 +38,8 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 2. 业务参数合法性校验（简单格式校验）
-	if len(req.Telephone) != 11 {
-		// 用户输入错误,属于正常业务流程,不记录日志
-		result.Fail(c, nil, consts.CodePhoneError)
-		return
-	}
 
-	if len(req.Password) == 0 {
-		// 用户输入错误,属于正常业务流程,不记录日志
-		result.Fail(c, nil, consts.CodeParamError)
-		return
-	}
-
-	// 3. 获取设备ID
+	// 2. 获取设备ID
 	// 优先从 Header 获取设备唯一标识，若无则生成一个新的 UUID 标识当前设备
 	deviceId := c.GetHeader("X-Device-ID")
 	if deviceId == "" {
@@ -61,14 +49,14 @@ func Login(c *gin.Context) {
 		)
 	}
 
-	// 4. 构造服务层请求
+	// 3. 构造服务层请求
 	serviceReq := &dto.LoginRouterToService{
 		Telephone:  req.Telephone,
 		Password:   req.Password,
 		DeviceInfo: req.DeviceInfo,
 	}
 
-	// 5. 调用服务层处理业务逻辑
+	// 4. 调用服务层处理业务逻辑
 	serviceResp, err := service.Login(ctx, serviceReq, deviceId)
 	if err != nil {
 		// 服务层发生内部错误
@@ -76,14 +64,14 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 6. 处理服务层返回的业务响应
+	// 5. 处理服务层返回的业务响应
 	if serviceResp.Code != 0 {
 		// 业务逻辑失败（如密码错误、账号锁定等）
 		result.Fail(c, nil, int32(serviceResp.Code))
 		return
 	}
 
-	// 7. 记录登录成功日志
+	// 6. 记录登录成功日志
 	totalDuration := time.Since(startTime)
 	logger.Info(ctx, "登录成功",
 		logger.String("trace_id", traceId),
@@ -95,6 +83,6 @@ func Login(c *gin.Context) {
 		logger.Duration("total_duration", totalDuration),
 	)
 
-	// 8. 返回成功响应
+	// 7. 返回成功响应
 	result.Success(c, serviceResp.Data)
 }

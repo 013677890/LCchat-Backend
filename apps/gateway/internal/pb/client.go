@@ -4,9 +4,6 @@ import (
 	userpb "ChatServer/apps/user/pb"
 	"context"
 	"fmt"
-	"time"
-
-	"ChatServer/pkg/logger"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,15 +16,33 @@ var (
 	userServiceConn *grpc.ClientConn
 )
 
+// gRPC 服务配置，定义重试策略
+// 通过 JSON 配置实现自动重试
+const retryPolicy = `{
+	"methodConfig": [{
+		"name": [{"service": "user.UserService"}],
+		"waitForReady": true,
+		"retryPolicy": {
+			"maxAttempts": 5,
+			"initialBackoff": "0.1s",
+			"maxBackoff": "1s",
+			"backoffMultiplier": 2,
+			"retryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED", "UNKNOWN"]
+		}
+	}]
+}`
+
 // InitUserServiceClient 初始化用户服务gRPC客户端
 // addr: 用户服务地址，格式为 "host:port"，例如 "localhost:9090"
 func InitUserServiceClient(addr string) error {
 
 	// 建立gRPC连接
 	// 使用 insecure credentials（实际生产环境应该使用TLS）
+	// 配置自动重试策略
 	conn, err := grpc.NewClient(
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(retryPolicy), // 应用重试策略
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(4*1024*1024), // 4MB接收大小
 		),
@@ -62,65 +77,18 @@ func GetUserServiceClient() userpb.UserServiceClient {
 // ctx: 上下文
 // req: 登录请求
 // 返回: 登录响应和错误
+// 注意: gRPC 会根据配置的重试策略自动重试失败的请求
 func Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
 	client := GetUserServiceClient()
 	if client == nil {
 		return nil, fmt.Errorf("user service client not initialized")
 	}
 
+	// gRPC 会自动应用重试策略，无需手动重试
 	resp, err := client.Login(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
 	return resp, nil
-}
-
-
-// loginWithRetry 带重试机制的登录方法
-// ctx: 上下文
-// req: 登录请求
-// maxRetries: 最大重试次数
-// 返回: 登录响应和错误
-func LoginWithRetry(ctx context.Context, req *userpb.LoginRequest, maxRetries int) (*userpb.LoginResponse, error) {
-	var lastErr error
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// 如果不是第一次尝试，添加延迟
-		if attempt > 0 {
-			// 指数退避: 100ms, 200ms, 400ms, ...
-			backoff := time.Duration(100<<uint(attempt-1)) * time.Millisecond
-			if backoff > time.Second {
-				backoff = time.Second // 最大延迟1秒
-			}
-
-			select {
-			case <-time.After(backoff):
-				logger.Warn(ctx, "登录重试",
-					logger.Int("attempt", attempt),
-					logger.Duration("backoff", backoff),
-				)
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		// 调用登录方法
-		resp, err := Login(ctx, req)
-		if err == nil {
-			// 成功则直接返回
-			return resp, nil
-		}
-
-		// 记录错误
-		lastErr = err
-
-		// 如果上下文已取消，直接返回错误
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-	}
-
-	// 所有重试都失败
-	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
 }
