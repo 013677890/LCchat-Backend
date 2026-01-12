@@ -15,13 +15,26 @@ import (
 // 标签：
 //   - method: HTTP 方法 (GET, POST, PUT, DELETE 等)
 //   - path: 请求路径 (/api/v1/login 等)
-//   - status: HTTP 状态码 (200, 400, 401, 500 等)
+//   - status: HTTP 状态码 (200, 500)
 var httpRequestsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "gateway_http_requests_total",
 		Help: "Total number of HTTP requests processed by the gateway",
 	},
 	[]string{"method", "path", "status"},
+)
+
+// httpBusinessCodeTotal 计数器：记录业务状态码分布
+// 标签：
+//   - method: HTTP 方法
+//   - path: 请求路径
+//   - business_code: 业务状态码 (0=成功, 10001=参数错误, 11003=密码错误 等)
+var httpBusinessCodeTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "gateway_http_business_code_total",
+		Help: "Total number of HTTP requests by business code",
+	},
+	[]string{"method", "path", "business_code"},
 )
 
 // httpRequestDuration 直方图：记录请求耗时分布
@@ -107,33 +120,46 @@ func PrometheusMiddleware() gin.HandlerFunc {
 			httpRequestsInProgress.WithLabelValues(method).Dec()
 		}()
 
-		// 处理请求
-		c.Next()
+	// 处理请求
+	c.Next()
 
-		// 请求完成后，计算耗时
-		duration := time.Since(start).Seconds()
-		status := strconv.Itoa(c.Writer.Status())
+	// 请求完成后，计算耗时
+	duration := time.Since(start).Seconds()
+	status := strconv.Itoa(c.Writer.Status())
 
-		// 获取请求和响应大小
-		requestSize := float64(c.Request.ContentLength)
-		responseSize := float64(c.Writer.Size())
+	// 获取请求和响应大小
+	requestSize := float64(c.Request.ContentLength)
+	responseSize := float64(c.Writer.Size())
 
-		// 记录指标
-		// 1. 请求总数 +1
-		httpRequestsTotal.WithLabelValues(method, path, status).Inc()
-
-		// 2. 记录耗时
-		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
-
-		// 3. 记录请求大小（如果有）
-		if requestSize > 0 {
-			httpRequestSize.WithLabelValues(method, path).Observe(requestSize)
+	// 获取业务状态码（从响应封装中设置的值）
+	businessCode := int32(-1)
+	if code, exists := c.Get("business_code"); exists {
+		if codeInt32, ok := code.(int32); ok {
+			businessCode = codeInt32
 		}
+	}
 
-		// 4. 记录响应大小（如果有）
-		if responseSize > 0 {
-			httpResponseSize.WithLabelValues(method, path).Observe(responseSize)
-		}
+	// 记录指标
+	// 1. 请求总数 +1（按 HTTP 状态码统计）
+	httpRequestsTotal.WithLabelValues(method, path, status).Inc()
+
+	// 2. 业务状态码统计（如果存在）
+	if businessCode >= 0 {
+		httpBusinessCodeTotal.WithLabelValues(method, path, strconv.Itoa(int(businessCode))).Inc()
+	}
+
+	// 3. 记录耗时
+	httpRequestDuration.WithLabelValues(method, path).Observe(duration)
+
+	// 4. 记录请求大小（如果有）
+	if requestSize > 0 {
+		httpRequestSize.WithLabelValues(method, path).Observe(requestSize)
+	}
+
+	// 5. 记录响应大小（如果有）
+	if responseSize > 0 {
+		httpResponseSize.WithLabelValues(method, path).Observe(responseSize)
+	}
 	}
 }
 
@@ -152,6 +178,11 @@ func RecordGRPCRequest(service, method string, duration float64, err error) {
 // GetHTTPRequestsTotal 获取 HTTP 请求总数指标（可用于监控面板）
 func GetHTTPRequestsTotal() *prometheus.CounterVec {
 	return httpRequestsTotal
+}
+
+// GetHTTPBusinessCodeTotal 获取业务状态码统计指标
+func GetHTTPBusinessCodeTotal() *prometheus.CounterVec {
+	return httpBusinessCodeTotal
 }
 
 // GetHTTPRequestDuration 获取 HTTP 请求耗时指标

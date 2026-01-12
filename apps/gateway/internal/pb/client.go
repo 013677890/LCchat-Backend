@@ -25,6 +25,7 @@ const retryPolicy = `{
 	"methodConfig": [{
 		"name": [{"service": "user.UserService"}],
 		"waitForReady": true,
+		"timeout": "2s",
 		"retryPolicy": {
 			"maxAttempts": 5,
 			"initialBackoff": "0.1s",

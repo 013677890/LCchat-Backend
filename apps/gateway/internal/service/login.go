@@ -27,31 +27,29 @@ func Login(ctx context.Context, req *dto.LoginRouterToService, deviceId string) 
 
 	grpcResp, err := pb.Login(ctx, grpcReq)
 	if err != nil {
-		// 所有重试失败，记录错误日志并返回
+		// gRPC 调用失败，提取业务错误码
+		grpcErr := utils.ExtractGRPCError(err)
+
+		// 记录错误日志
 		logger.Error(ctx, "调用用户服务 gRPC 失败",
 			logger.ErrorField("error", err),
+			logger.Int32("business_code", grpcErr.Code),
+			logger.String("business_message", grpcErr.Message),
 			logger.Duration("duration", time.Since(startTime)),
 		)
-		return &dto.ServiceLoginResponse{
-			Code:    consts.CodeInternalError,
-			Message: "",
-			Data:    nil,
-		}, err
-	}
 
-	// 2. 处理用户服务返回的业务响应
-	if grpcResp.Code != 0 {
-		// 用户认证失败(如密码错误、账号锁定等)
+		// 返回业务错误（不返回 Go error，因为这是预期的业务失败）
 		return &dto.ServiceLoginResponse{
-			Code:    int(grpcResp.Code),
+			Code:    int(grpcErr.Code),
 			Message: "",
 			Data:    nil,
 		}, nil
 	}
 
+	// 2. gRPC 调用成功，检查响应数据
 	if grpcResp.UserInfo == nil {
 		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "成功响应中用户信息为空")
+		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
 		return &dto.ServiceLoginResponse{
 			Code:    consts.CodeInternalError,
 			Message: "",

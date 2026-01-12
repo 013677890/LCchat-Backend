@@ -256,10 +256,10 @@ message UserInfo {
     int64 updated_at = 11;    // 更新时间
 }
 
-// CommonResponse 通用响应
+// CommonResponse 通用响应（已废弃，使用 gRPC status 代替）
+// gRPC 使用原生的 status.Error() 返回错误，不需要在响应体中包含 code 和 message
 message CommonResponse {
-    int32 code = 1;           // 状态码(0:成功 非0:失败)
-    string message = 2;      // 响应消息
+    // 已移除 code 和 message 字段
 }
 
 // ==================== 用户认证相关消息 ====================
@@ -272,10 +272,12 @@ message LoginRequest {
 }
 
 // LoginResponse 登录响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (details 中包含业务错误码 11001)
+//   - codes.Unauthenticated: 密码错误 (details 中包含业务错误码 11003)
+//   - codes.PermissionDenied: 用户被禁用 (details 中包含业务错误码 11004)
 message LoginResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在 11003:密码错误 11004:用户被禁用)
-    string message = 2;       // 响应消息
-    UserInfo user_info = 3;   // 用户信息(成功时返回)
+    UserInfo user_info = 1;   // 用户信息(成功时返回)
 }
 
 // RegisterRequest 注册请求
@@ -288,12 +290,14 @@ message RegisterRequest {
 }
 
 // RegisterResponse 注册响应
+// 错误通过 gRPC status 返回：
+//   - codes.AlreadyExists: 用户已存在 (11002)
+//   - codes.InvalidArgument: 手机号格式错误 (11005) 或验证码错误 (11006)
+//   - codes.DeadlineExceeded: 验证码过期 (11007)
 message RegisterResponse {
-    int32 code = 1;           // 状态码(0:成功 11002:用户已存在 11005:手机号格式错误 11006:验证码错误 11007:验证码过期)
-    string message = 2;       // 响应消息
-    string user_uuid = 3;     // 新用户的UUID
-    string telephone = 4;     // 手机号
-    string nickname = 5;      // 昵称
+    string user_uuid = 1;     // 新用户的UUID
+    string telephone = 2;     // 手机号
+    string nickname = 3;      // 昵称
 }
 
 // SendSmsCodeRequest 发送验证码请求
@@ -303,9 +307,11 @@ message SendSmsCodeRequest {
 }
 
 // SendSmsCodeResponse 发送验证码响应
+// 错误通过 gRPC status 返回：
+//   - codes.InvalidArgument: 手机号格式错误 (11005)
+//   - codes.ResourceExhausted: 发送过于频繁 (10005)
 message SendSmsCodeResponse {
-    int32 code = 1;           // 状态码(0:成功 11005:手机号格式错误 10005:发送过于频繁)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // ValidateSmsCodeRequest 验证码验证请求
@@ -316,10 +322,11 @@ message ValidateSmsCodeRequest {
 }
 
 // ValidateSmsCodeResponse 验证码验证响应
+// 错误通过 gRPC status 返回：
+//   - codes.InvalidArgument: 验证码错误 (11006)
+//   - codes.DeadlineExceeded: 验证码过期 (11007)
 message ValidateSmsCodeResponse {
-    int32 code = 1;           // 状态码(0:成功 11006:验证码错误 11007:验证码过期)
-    string message = 2;       // 响应消息
-    bool is_valid = 3;        // 是否有效
+    bool is_valid = 1;        // 是否有效
 }
 
 // RefreshTokenRequest 刷新Token请求
@@ -329,10 +336,11 @@ message RefreshTokenRequest {
 }
 
 // RefreshTokenResponse 刷新Token响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
+//   - codes.PermissionDenied: 用户被禁用 (11004)
 message RefreshTokenResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在 11004:用户被禁用)
-    string message = 2;       // 响应消息
-    UserInfo user_info = 3;   // 用户信息(用于生成新的Access Token)
+    UserInfo user_info = 1;   // 用户信息(用于生成新的Access Token)
 }
 
 // LogoutRequest 登出请求
@@ -343,8 +351,7 @@ message LogoutRequest {
 
 // LogoutResponse 登出响应
 message LogoutResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // ==================== 用户信息管理消息 ====================
@@ -356,10 +363,10 @@ message GetUserInfoRequest {
 }
 
 // GetUserInfoResponse 获取用户信息响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
 message GetUserInfoResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在)
-    string message = 2;       // 响应消息
-    UserInfo user_info = 3;   // 用户信息
+    UserInfo user_info = 1;   // 用户信息
 }
 
 // UpdateUserInfoRequest 更新用户信息请求
@@ -372,10 +379,10 @@ message UpdateUserInfoRequest {
 }
 
 // UpdateUserInfoResponse 更新用户信息响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
 message UpdateUserInfoResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在)
-    string message = 2;       // 响应消息
-    UserInfo user_info = 3;   // 更新后的用户信息
+    UserInfo user_info = 1;   // 更新后的用户信息
 }
 
 // UpdateAvatarRequest 更新头像请求
@@ -385,10 +392,10 @@ message UpdateAvatarRequest {
 }
 
 // UpdateAvatarResponse 更新头像响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
 message UpdateAvatarResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在)
-    string message = 2;       // 响应消息
-    string avatar_url = 3;    // 更新后的头像URL
+    string avatar_url = 1;    // 更新后的头像URL
 }
 
 // ChangePasswordRequest 修改密码请求
@@ -399,9 +406,11 @@ message ChangePasswordRequest {
 }
 
 // ChangePasswordResponse 修改密码响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
+//   - codes.Unauthenticated: 旧密码错误 (11003)
 message ChangePasswordResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在 11003:旧密码错误)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // BindEmailRequest 绑定邮箱请求
@@ -412,9 +421,11 @@ message BindEmailRequest {
 }
 
 // BindEmailResponse 绑定邮箱响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 用户不存在 (11001)
+//   - codes.InvalidArgument: 验证码错误 (11006)
 message BindEmailResponse {
-    int32 code = 1;           // 状态码(0:成功 11001:用户不存在 11006:验证码错误)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // ==================== 好友关系管理消息 ====================
@@ -428,10 +439,8 @@ message SearchUserRequest {
 
 // SearchUserResponse 搜索用户响应
 message SearchUserResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
-    repeated UserInfo users = 3; // 用户列表(手机号已脱敏)
-    PaginationResponse pagination = 4; // 分页信息
+    repeated UserInfo users = 1; // 用户列表(手机号已脱敏)
+    PaginationResponse pagination = 2; // 分页信息
 }
 
 // SendFriendRequestRequest 发送好友申请请求
@@ -442,10 +451,11 @@ message SendFriendRequestRequest {
 }
 
 // SendFriendRequestResponse 发送好友申请响应
+// 错误通过 gRPC status 返回：
+//   - codes.AlreadyExists: 已经是好友 (12001) 或好友申请已发送 (12002)
+//   - codes.PermissionDenied: 已经是黑名单 (12004)
 message SendFriendRequestResponse {
-    int32 code = 1;             // 状态码(0:成功 12001:已经是好友 12002:好友申请已发送 12004:已经是黑名单)
-    string message = 2;         // 响应消息
-    string request_id = 3;      // 申请ID
+    string request_id = 1;      // 申请ID
 }
 
 // HandleFriendRequestRequest 处理好友申请请求
@@ -458,8 +468,7 @@ message HandleFriendRequestRequest {
 
 // HandleFriendRequestResponse 处理好友申请响应
 message HandleFriendRequestResponse {
-    int32 code = 1;             // 状态码(0:成功)
-    string message = 2;         // 响应消息
+    // 成功时无需返回数据
 }
 
 // GetFriendRequestsRequest 获取好友申请列表请求
@@ -482,10 +491,8 @@ message FriendRequestInfo {
 
 // GetFriendRequestsResponse 获取好友申请列表响应
 message GetFriendRequestsResponse {
-    int32 code = 1;             // 状态码(0:成功)
-    string message = 2;         // 响应消息
-    repeated FriendRequestInfo requests = 3; // 好友申请列表
-    PaginationResponse pagination = 4; // 分页信息
+    repeated FriendRequestInfo requests = 1; // 好友申请列表
+    PaginationResponse pagination = 2; // 分页信息
 }
 
 // GetFriendListRequest 获取好友列表请求
@@ -508,10 +515,8 @@ message FriendInfo {
 
 // GetFriendListResponse 获取好友列表响应
 message GetFriendListResponse {
-    int32 code = 1;            // 状态码(0:成功)
-    string message = 2;        // 响应消息
-    repeated FriendInfo friends = 3; // 好友列表
-    PaginationResponse pagination = 4; // 分页信息
+    repeated FriendInfo friends = 1; // 好友列表
+    PaginationResponse pagination = 2; // 分页信息
 }
 
 // DeleteFriendRequest 删除好友请求
@@ -521,9 +526,10 @@ message DeleteFriendRequest {
 }
 
 // DeleteFriendResponse 删除好友响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 不存在该好友关系 (12003)
 message DeleteFriendResponse {
-    int32 code = 1;           // 状态码(0:成功 12003:不存在该好友关系)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // SetFriendRemarkRequest 设置好友备注请求
@@ -534,9 +540,10 @@ message SetFriendRemarkRequest {
 }
 
 // SetFriendRemarkResponse 设置好友备注响应
+// 错误通过 gRPC status 返回：
+//   - codes.NotFound: 不存在该好友关系 (12003)
 message SetFriendRemarkResponse {
-    int32 code = 1;           // 状态码(0:成功 12003:不存在该好友关系)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // BlockUserRequest 拉黑用户请求
@@ -547,8 +554,7 @@ message BlockUserRequest {
 
 // BlockUserResponse 拉黑用户响应
 message BlockUserResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // UnblockUserRequest 解除拉黑请求
@@ -559,8 +565,7 @@ message UnblockUserRequest {
 
 // UnblockUserResponse 解除拉黑响应
 message UnblockUserResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // GetBlacklistRequest 获取黑名单请求
@@ -579,10 +584,8 @@ message BlacklistUser {
 
 // GetBlacklistResponse 获取黑名单响应
 message GetBlacklistResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
-    repeated BlacklistUser blacklist = 3; // 黑名单列表
-    PaginationResponse pagination = 4; // 分页信息
+    repeated BlacklistUser blacklist = 1; // 黑名单列表
+    PaginationResponse pagination = 2; // 分页信息
 }
 
 // ==================== 设备会话管理消息 ====================
@@ -597,8 +600,7 @@ message CreateDeviceSessionRequest {
 
 // CreateDeviceSessionResponse 创建设备会话响应
 message CreateDeviceSessionResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // DeviceSessionInfo 设备会话信息
@@ -621,9 +623,7 @@ message GetDeviceSessionsRequest {
 
 // GetDeviceSessionsResponse 获取设备列表响应
 message GetDeviceSessionsResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
-    repeated DeviceSessionInfo devices = 3; // 设备列表
+    repeated DeviceSessionInfo devices = 1; // 设备列表
 }
 
 // UpdateDeviceOnlineStateRequest 更新设备在线状态请求
@@ -635,8 +635,7 @@ message UpdateDeviceOnlineStateRequest {
 
 // UpdateDeviceOnlineStateResponse 更新设备在线状态响应
 message UpdateDeviceOnlineStateResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // KickDeviceRequest 踢出设备请求
@@ -647,8 +646,7 @@ message KickDeviceRequest {
 
 // KickDeviceResponse 踢出设备响应
 message KickDeviceResponse {
-    int32 code = 1;           // 状态码(0:成功)
-    string message = 2;       // 响应消息
+    // 成功时无需返回数据
 }
 
 // ==================== 批量用户查询消息 ====================
@@ -660,9 +658,7 @@ message BatchGetUsersRequest {
 
 // BatchGetUsersResponse 批量获取用户信息响应
 message BatchGetUsersResponse {
-    int32 code = 1;                       // 状态码(0:成功)
-    string message = 2;                   // 响应消息
-    map<string, UserInfo> users = 3;      // 用户信息映射(UUID -> UserInfo)
+    map<string, UserInfo> users = 1;      // 用户信息映射(UUID -> UserInfo)
 }
 
 // OnlineState 在线状态
@@ -679,7 +675,5 @@ message GetUsersOnlineStateRequest {
 
 // GetUsersOnlineStateResponse 获取用户在线状态响应
 message GetUsersOnlineStateResponse {
-    int32 code = 1;                      // 状态码(0:成功)
-    string message = 2;                  // 响应消息
-    map<string, OnlineState> online_states = 3; // 在线状态映射(UUID -> OnlineState)
+    map<string, OnlineState> online_states = 1; // 在线状态映射(UUID -> OnlineState)
 }
