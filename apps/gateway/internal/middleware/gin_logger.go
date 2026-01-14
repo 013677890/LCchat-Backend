@@ -55,19 +55,3 @@ func GinLogger() gin.HandlerFunc {
 		}
 	}
 }
-
-// GinRecovery recover 项目可能出现的 panic
-func GinRecovery(stack bool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		defer func() {
-			if err := recover(); err != nil {
-				// TODO: 完善 panic 的日志记录，包括堆栈信息
-				logger.Error(c.Request.Context(), "gin panic",
-					logger.Any("error", err),
-				)
-				c.AbortWithStatus(500)
-			}
-		}()
-		c.Next()
-	}
-}
