@@ -3,6 +3,7 @@ package result
 import (
 	"ChatServer/consts" // 你的错误码定义包
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,6 +14,27 @@ type Response struct {
 	Message string      `json:"message"`
 	Data    interface{} `json:"data"`
 	TraceId string      `json:"trace_id"`
+}
+
+var responsePool = &sync.Pool{
+	New: func() interface{} {
+		return &Response{}
+	},
+}
+
+// GetResponse 获取响应
+func GetResponse() *Response {
+	resp := responsePool.Get().(*Response)
+	resp.Code = 0
+	resp.Message = ""
+	resp.Data = nil
+	resp.TraceId = ""
+	return resp
+}
+
+// PutResponse 放回响应
+func PutResponse(resp *Response) {
+	responsePool.Put(resp)
 }
 
 // Result 返回响应
@@ -34,12 +56,15 @@ func Result(c *gin.Context, data interface{}, message string, code int32) {
 	// 将业务状态码存储到 context 中供监控中间件使用
 	c.Set("business_code", code)
 
-	c.JSON(httpStatus, Response{
-		Code:    code,
-		Message: message,
-		Data:    data,
-		TraceId: traceId,
-	})
+	resp := GetResponse()
+	defer PutResponse(resp)
+	resp.Code = code
+	resp.Message = message
+	resp.Data = data
+	resp.TraceId = traceId
+
+	c.JSON(httpStatus, resp)
+
 }
 
 // Success 返回成功响应
