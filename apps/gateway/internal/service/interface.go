@@ -5,12 +5,11 @@ import (
 	"context"
 )
 
-// LoginService 登录服务接口
+// AuthService 认证服务接口
 // 职责：
 //   - 调用下游用户服务进行认证
 //   - 生成访问令牌（Access Token 和 Refresh Token）
-//   - 组装完整的登录响应
-type LoginService interface {
+type AuthService interface {
 	// Login 用户登录
 	// ctx: 请求上下文
 	// req: 登录请求

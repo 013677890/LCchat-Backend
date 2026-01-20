@@ -4,9 +4,11 @@ import (
 	"ChatServer/apps/user/internal/dto"
 	"ChatServer/apps/user/internal/repository"
 	"ChatServer/apps/user/internal/utils"
+	"ChatServer/consts"
 	"ChatServer/pkg/logger"
 	"context"
 	"errors"
+	"strconv"
 
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
@@ -67,20 +69,20 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 					logger.Warn(ctx, "用户不存在",
 						logger.String("account", utils.MaskPhone(req.Account)),
 					)
-					return nil, status.Error(codes.NotFound, "用户不存在")
+					return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
 				}
 				logger.Error(ctx, "查询用户失败",
 					logger.String("account", utils.MaskPhone(req.Account)),
 					logger.ErrorField("error", err),
 				)
-				return nil, status.Error(codes.Internal, "数据库查询失败")
+				return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 			}
 		} else {
 			logger.Error(ctx, "查询用户失败",
 				logger.String("account", utils.MaskPhone(req.Account)),
 				logger.ErrorField("error", err),
 			)
-			return nil, status.Error(codes.Internal, "数据库查询失败")
+			return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 		}
 	}
 
@@ -90,7 +92,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 			logger.String("user_uuid", user.Uuid),
 			logger.String("account", utils.MaskPhone(req.Account)),
 		)
-		return nil, status.Error(codes.PermissionDenied, "用户已被禁用")
+		return nil, status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeUserDisabled))
 	}
 
 	// 3. 校验密码
@@ -100,7 +102,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 			logger.String("user_uuid", user.Uuid),
 			logger.String("account", utils.MaskPhone(req.Account)),
 		)
-		return nil, status.Error(codes.Unauthenticated, "密码错误")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodePasswordError))
 	}
 
 	// 4. 登录成功

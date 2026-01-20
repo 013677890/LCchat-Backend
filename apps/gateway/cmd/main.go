@@ -78,17 +78,17 @@ func main() {
 	logger.Info(ctx, "用户服务 gRPC 客户端初始化完成", logger.String("address", userServiceAddr))
 
 	// 4. 初始化 Service 层（依赖注入）
-	loginService := service.NewLoginService(userClient)
-	logger.Info(ctx, "登录服务初始化完成")
+	authService := service.NewAuthService(userClient)
+	logger.Info(ctx, "认证服务初始化完成")
 
 	// 5. 初始化 Handler 层（依赖注入）
-	loginHandler := v1.NewLoginHandler(loginService)
-	logger.Info(ctx, "登录处理器初始化完成")
+	authHandler := v1.NewAuthHandler(authService)
+	logger.Info(ctx, "认证处理器初始化完成")
 
 	// 6. 初始化路由（依赖注入）
 	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
 	gin.SetMode(gin.ReleaseMode)
-	r := router.InitRouter(loginHandler)
+	r := router.InitRouter(authHandler)
 	logger.Info(ctx, "路由初始化完成")
 
 	// 7. 配置服务器

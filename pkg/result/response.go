@@ -10,7 +10,7 @@ import (
 
 // Response 响应结构体
 type Response struct {
-	Code    int32       `json:"code"`
+	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data"`
 	TraceId string      `json:"trace_id"`
@@ -41,7 +41,7 @@ func PutResponse(resp *Response) {
 // HTTP 状态码策略：
 //   - 业务成功或业务失败（如参数错误、密码错误等）：返回 200，业务状态码在 body 的 code 字段
 //   - 系统内部错误（code >= 30000）：返回 500
-func Result(c *gin.Context, data interface{}, message string, code int32) {
+func Result(c *gin.Context, data interface{}, message string, code int) {
 	traceId := c.GetString("trace_id")
 	if message == "" {
 		message = consts.GetMessage(code)
@@ -73,7 +73,7 @@ func Success(c *gin.Context, data interface{}) {
 }
 
 // Fail 返回失败响应
-func Fail(c *gin.Context, data interface{}, code int32) {
+func Fail(c *gin.Context, data interface{}, code int) {
 	Result(c, data, "", code)
 }
 
@@ -83,12 +83,12 @@ func SuccessWithMessage(c *gin.Context, data interface{}, message string) {
 }
 
 // FailWithMessage 返回失败响应并自定义消息
-func FailWithMessage(c *gin.Context, data interface{}, message string, code int32) {
+func FailWithMessage(c *gin.Context, data interface{}, message string, code int) {
 	Result(c, data, message, code)
 }
 
 // SystemError 返回系统错误响应(500)
 // 已废弃：建议直接使用 Fail 函数，会自动根据 code 判断返回 200 还是 500
-func SystemError(c *gin.Context, code int32) {
+func SystemError(c *gin.Context, code int) {
 	Result(c, nil, "", code)
 }

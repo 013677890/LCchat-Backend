@@ -14,16 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// LoginHandler 登录处理器
-type LoginHandler struct {
-	loginService service.LoginService
+// AuthHandler 认证处理器
+type AuthHandler struct {
+	authService service.AuthService
 }
 
-// NewLoginHandler 创建登录处理器
-// loginService: 登录服务
-func NewLoginHandler(loginService service.LoginService) *LoginHandler {
-	return &LoginHandler{
-		loginService: loginService,
+// NewAuthHandler 创建认证处理器
+// authService: 认证服务
+func NewAuthHandler(authService service.AuthService) *AuthHandler {
+	return &AuthHandler{
+		authService: authService,
 	}
 }
 
@@ -36,7 +36,7 @@ func NewLoginHandler(loginService service.LoginService) *LoginHandler {
 // @Param request body dto.LoginRequest true "登录请求"
 // @Success 200 {object} dto.LoginResponse
 // @Router /api/v1/public/login [post]
-func (h *LoginHandler) Login(c *gin.Context) {
+func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := middleware.NewContextWithGin(c)
 	traceId := c.GetString("trace_id")
 	ip := c.ClientIP()
@@ -62,12 +62,12 @@ func (h *LoginHandler) Login(c *gin.Context) {
 	}
 
 	// 3. 调用服务层处理业务逻辑（依赖注入）
-	loginResp, err := h.loginService.Login(ctx, &req, deviceId)
+	loginResp, err := h.authService.Login(ctx, &req, deviceId)
 	if err != nil {
 		// 检查是否为业务错误
-		if bizErr, ok := err.(*service.BusinessError); ok {
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
 			// 业务逻辑失败（如密码错误、账号锁定等）
-			result.Fail(c, nil, bizErr.Code)
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
 			return
 		}
 

@@ -11,7 +11,7 @@ import (
 
 // InitRouter 初始化路由
 // loginHandler: 登录处理器（依赖注入）
-func InitRouter(loginHandler *v1.LoginHandler) *gin.Engine {
+func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
 	r := gin.New()
 
 	// 恢复中间件
@@ -46,8 +46,11 @@ func InitRouter(loginHandler *v1.LoginHandler) *gin.Engine {
 		// 公开接口（不需要认证）
 		public := api.Group("/public")
 		{
-			// 登录接口（使用依赖注入的 Handler）
-			public.POST("/login", loginHandler.Login)
+			//转发给user服务的接口
+			user := public.Group("/user")
+			{
+				user.POST("/login", authHandler.Login)
+			}
 		}
 
 		// 需要认证的接口
