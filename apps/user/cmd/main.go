@@ -16,6 +16,7 @@ import (
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/mysql"
 	pkgredis "ChatServer/pkg/redis"
+	"ChatServer/pkg/util"
 
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
@@ -63,12 +64,12 @@ func main() {
 	}
 
 	// 4. 组装依赖 - Repository 层
-	authRepo := repository.NewAuthRepository(db)
-	userRepo := repository.NewUserRepository(db)
-	friendRepo := repository.NewFriendRepository(db)
-	applyRepo := repository.NewApplyRepository(db)
-	blacklistRepo := repository.NewBlacklistRepository(db)
-	deviceRepo := repository.NewDeviceRepository(db)
+	authRepo := repository.NewAuthRepository(db, redisClient)
+	userRepo := repository.NewUserRepository(db, redisClient)
+	friendRepo := repository.NewFriendRepository(db, redisClient)
+	applyRepo := repository.NewApplyRepository(db, redisClient)
+	blacklistRepo := repository.NewBlacklistRepository(db, redisClient)
+	deviceRepo := repository.NewDeviceRepository(db, redisClient)
 
 	// 5. 组装依赖 - Service 层
 	authService := service.NewAuthService(authRepo, deviceRepo)
@@ -84,7 +85,10 @@ func main() {
 	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
 	deviceHandler := handler.NewDeviceHandler(deviceService)
 
-	// 7. 启动 gRPC Server
+	// 7.初始化小组件
+	util.InitSnowflake(1)//雪花算法
+
+	// 8. 启动 gRPC Server
 	opts := server.Options{
 		Address:          ":9090",
 		EnableHealth:     true,
@@ -117,7 +121,7 @@ func main() {
 		log.Fatalf("启动gRPC服务失败: %v", err)
 	}
 
-	// 8. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
+	// 9. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", interceptors.GetMetricsHandler())
 

@@ -4,17 +4,19 @@ import (
 	"ChatServer/model"
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // applyRepositoryImpl 好友申请数据访问层实现
 type applyRepositoryImpl struct {
 	db *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewApplyRepository 创建好友申请仓储实例
-func NewApplyRepository(db *gorm.DB) IApplyRepository {
-	return &applyRepositoryImpl{db: db}
+func NewApplyRepository(db *gorm.DB, redisClient *redis.Client) IApplyRepository {
+	return &applyRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // Create 创建好友申请

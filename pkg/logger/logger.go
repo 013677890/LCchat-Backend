@@ -113,8 +113,16 @@ func Info(ctx context.Context, msg string, fields ...zap.Field) {
 		global.Info(msg, fields...)
 	} else {
 		traceId := ctx.Value("trace_id") //这里获取trace_id, 从gin的上下文中获取
+		userUUID := ctx.Value("user_uuid")
+		deviceID := ctx.Value("device_id")
 		if traceId != nil {
 			fields = append(fields, zap.String("trace_id", traceId.(string)))
+		}
+		if userUUID != nil {
+			fields = append(fields, zap.String("user_uuid", userUUID.(string)))
+		}
+		if deviceID != nil {
+			fields = append(fields, zap.String("device_id", deviceID.(string)))
 		}
 		global.Info(msg, fields...)
 	}
@@ -125,8 +133,16 @@ func Warn(ctx context.Context, msg string, fields ...zap.Field) {
 		global.Warn(msg, fields...)
 	} else {
 		traceId := ctx.Value("trace_id")
+		userUUID := ctx.Value("user_uuid")
+		deviceID := ctx.Value("device_id")
 		if traceId != nil {
 			fields = append(fields, zap.String("trace_id", traceId.(string)))
+		}
+		if userUUID != nil {
+			fields = append(fields, zap.String("user_uuid", userUUID.(string)))
+		}
+		if deviceID != nil {
+			fields = append(fields, zap.String("device_id", deviceID.(string)))
 		}
 		global.Warn(msg, fields...)
 	}
@@ -137,8 +153,16 @@ func Error(ctx context.Context, msg string, fields ...zap.Field) {
 		global.Error(msg, fields...)
 	} else {
 		traceId := ctx.Value("trace_id")
+		userUUID := ctx.Value("user_uuid")
+		deviceID := ctx.Value("device_id")
 		if traceId != nil {
 			fields = append(fields, zap.String("trace_id", traceId.(string)))
+		}
+		if userUUID != nil {
+			fields = append(fields, zap.String("user_uuid", userUUID.(string)))
+		}
+		if deviceID != nil {
+			fields = append(fields, zap.String("device_id", deviceID.(string)))
 		}
 		global.Error(msg, fields...)
 	}
@@ -149,8 +173,16 @@ func Fatal(ctx context.Context, msg string, fields ...zap.Field) {
 		global.Fatal(msg, fields...)
 	} else {
 		traceId := ctx.Value("trace_id")
+		userUUID := ctx.Value("user_uuid")
+		deviceID := ctx.Value("device_id")
 		if traceId != nil {
 			fields = append(fields, zap.String("trace_id", traceId.(string)))
+		}
+		if userUUID != nil {
+			fields = append(fields, zap.String("user_uuid", userUUID.(string)))
+		}
+		if deviceID != nil {
+			fields = append(fields, zap.String("device_id", deviceID.(string)))
 		}
 		global.Fatal(msg, fields...)
 	}
@@ -161,8 +193,16 @@ func Debug(ctx context.Context, msg string, fields ...zap.Field) {
 		global.Debug(msg, fields...)
 	} else {
 		traceId := ctx.Value("trace_id")
+		userUUID := ctx.Value("user_uuid")
+		deviceID := ctx.Value("device_id")
 		if traceId != nil {
 			fields = append(fields, zap.String("trace_id", traceId.(string)))
+		}
+		if userUUID != nil {
+			fields = append(fields, zap.String("user_uuid", userUUID.(string)))
+		}
+		if deviceID != nil {
+			fields = append(fields, zap.String("device_id", deviceID.(string)))
 		}
 		global.Debug(msg, fields...)
 	}

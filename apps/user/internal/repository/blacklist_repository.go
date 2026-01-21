@@ -4,17 +4,19 @@ import (
 	"ChatServer/model"
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // blacklistRepositoryImpl 黑名单数据访问层实现
 type blacklistRepositoryImpl struct {
 	db *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewBlacklistRepository 创建黑名单仓储实例
-func NewBlacklistRepository(db *gorm.DB) IBlacklistRepository {
-	return &blacklistRepositoryImpl{db: db}
+func NewBlacklistRepository(db *gorm.DB, redisClient *redis.Client) IBlacklistRepository {
+	return &blacklistRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // AddBlacklist 拉黑用户

@@ -4,17 +4,19 @@ import (
 	"ChatServer/model"
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // userRepositoryImpl 用户信息数据访问层实现
 type userRepositoryImpl struct {
 	db *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewUserRepository 创建用户信息仓储实例
-func NewUserRepository(db *gorm.DB) IUserRepository {
-	return &userRepositoryImpl{db: db}
+func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
+	return &userRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // GetByUUID 根据UUID查询用户信息

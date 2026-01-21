@@ -9,12 +9,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// NewContextWithGin 从 gin.Context 创建包含 trace_id 的 context.Context
-// 用于将 Gin 上下文中的 trace_id 传递到日志系统
+// NewContextWithGin 从 gin.Context 创建包含 trace_id、user_uuid、device_id 的 context.Context
+// 用于将 Gin 上下文中的 trace_id、user_uuid、device_id 传递到日志系统
 func NewContextWithGin(c *gin.Context) context.Context {
 	ctx := c.Request.Context()
 	if traceId, exists := c.Get("trace_id"); exists {
-		return context.WithValue(ctx, "trace_id", traceId)
+		ctx = context.WithValue(ctx, "trace_id", traceId)
+	}
+	if userUUID, exists := c.Get("user_uuid"); exists {
+		ctx = context.WithValue(ctx, "user_uuid", userUUID)
+	}
+	if deviceID, exists := c.Get("device_id"); exists {
+		ctx = context.WithValue(ctx, "device_id", deviceID)
 	}
 	return ctx
 }

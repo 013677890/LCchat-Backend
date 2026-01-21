@@ -8,7 +8,6 @@ import (
 	"ChatServer/consts"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/result"
-	"ChatServer/pkg/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,18 +45,25 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 2. 获取设备ID
-	// 优先从 Header 获取设备唯一标识，若无则生成一个新的 UUID 标识当前设备
-	deviceId := c.GetHeader("X-Device-ID")
-	if deviceId == "" {
-		deviceId = util.NewUUID()
-		logger.Debug(ctx, "请求头中无设备ID,生成新设备ID",
-			logger.String("device_id", deviceId),
-		)
+	// 2. 如果context中没有device_id,则从X-Device-ID中获取
+	deviceId, exists := c.Get("device_id")
+	if !exists {
+		// 从X-Device-ID中获取
+		deviceId = c.GetHeader("X-Device-ID")
+		//如果为空直接返回
+		if deviceId == "" {
+			logger.Error(ctx, "请求头中无设备ID",
+				logger.String("device_id", deviceId.(string)),
+			)
+			result.Fail(c, nil, consts.CodeParamError)
+			return
+		}
+		// 写入context
+		c.Set("device_id", deviceId)
 	}
 
 	// 3. 调用服务层处理业务逻辑（依赖注入）
-	loginResp, err := h.authService.Login(ctx, &req, deviceId)
+	loginResp, err := h.authService.Login(ctx, &req, deviceId.(string))
 	if err != nil {
 		// 检查是否为业务错误
 		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
@@ -73,7 +79,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		result.Fail(c, nil, consts.CodeInternalError)
 		return
 	}
-
 
 	// 5. 返回成功响应
 	result.Success(c, loginResp)

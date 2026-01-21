@@ -4,17 +4,19 @@ import (
 	"ChatServer/model"
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // friendRepositoryImpl 好友关系数据访问层实现
 type friendRepositoryImpl struct {
 	db *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewFriendRepository 创建好友关系仓储实例
-func NewFriendRepository(db *gorm.DB) IFriendRepository {
-	return &friendRepositoryImpl{db: db}
+func NewFriendRepository(db *gorm.DB, redisClient *redis.Client) IFriendRepository {
+	return &friendRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // SearchUser 搜索用户（按手机号或昵称）

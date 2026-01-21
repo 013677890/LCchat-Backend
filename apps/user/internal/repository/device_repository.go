@@ -3,19 +3,41 @@ package repository
 import (
 	"ChatServer/model"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // deviceRepositoryImpl 设备会话数据访问层实现
 type deviceRepositoryImpl struct {
-	db *gorm.DB
+	db          *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewDeviceRepository 创建设备会话仓储实例
-func NewDeviceRepository(db *gorm.DB) IDeviceRepository {
-	return &deviceRepositoryImpl{db: db}
+func NewDeviceRepository(db *gorm.DB, redisClient *redis.Client) IDeviceRepository {
+	return &deviceRepositoryImpl{db: db, redisClient: redisClient}
+}
+
+// Redis Key 构造函数
+func (r *deviceRepositoryImpl) accessTokenKey(userUUID, deviceID string) string {
+	return fmt.Sprintf("auth:at:%s:%s", userUUID, deviceID)
+}
+
+func (r *deviceRepositoryImpl) refreshTokenKey(userUUID, deviceID string) string {
+	return fmt.Sprintf("auth:rt:%s:%s", userUUID, deviceID)
+}
+
+// md5Hash 计算字符串的 MD5 哈希
+func md5Hash(s string) string {
+	h := md5.New()
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Create 创建设备会话
@@ -30,7 +52,114 @@ func (r *deviceRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID strin
 
 // GetByDeviceID 根据设备ID获取会话
 func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, deviceID string) (*model.DeviceSession, error) {
-	return nil, nil // TODO: 根据设备ID获取会话
+	var session model.DeviceSession
+	err := r.db.WithContext(ctx).
+		Where("user_uuid = ? AND device_id = ?", userUUID, deviceID).
+		First(&session).Error
+	if err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+// UpsertSession 创建或更新设备会话（Upsert）
+func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model.DeviceSession) error {
+	// 查询是否存在
+	existingSession, err := r.GetByDeviceID(ctx, session.UserUuid, session.DeviceId)
+
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		// 查询出错（非 NotFound 错误）
+		return fmt.Errorf("query device session failed: %w", err)
+	}
+
+	now := time.Now()
+
+	if existingSession != nil {
+		// 存在则更新
+		updates := map[string]interface{}{
+			"device_name":  session.DeviceName,
+			"platform":     session.Platform,
+			"app_version":  session.AppVersion,
+			"ip":           session.IP,
+			"user_agent":   session.UserAgent,
+			"last_seen_at": &now,
+			"status":       0, // 在线状态
+			"updated_at":   now,
+		}
+
+		// 注意：不更新 Token 和 RefreshToken，它们只存在 Redis 中
+
+		return r.db.WithContext(ctx).
+			Model(&model.DeviceSession{}).
+			Where("user_uuid = ? AND device_id = ?", session.UserUuid, session.DeviceId).
+			Updates(updates).Error
+	} else {
+		// 不存在则插入
+		session.CreatedAt = now
+		session.UpdatedAt = now
+		session.LastSeenAt = &now
+		session.Status = 0 // 在线状态
+		return r.db.WithContext(ctx).Create(session).Error
+	}
+}
+
+// StoreAccessToken 将 AccessToken 存入 Redis
+// userUUID: 用户 UUID
+// deviceID: 设备 ID
+// accessToken: 访问令牌（完整的 JWT 字符串）
+// expireDuration: 过期时间
+func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, deviceID, accessToken string, expireDuration time.Duration) error {
+	key := r.accessTokenKey(userUUID, deviceID)
+	// 存储 MD5 哈希值以节省内存
+	value := md5Hash(accessToken)
+	return r.redisClient.Set(ctx, key, value, expireDuration).Err()
+}
+
+// StoreRefreshToken 将 RefreshToken 存入 Redis
+// userUUID: 用户 UUID
+// deviceID: 设备 ID
+// refreshToken: 刷新令牌（UUID 字符串）
+// expireDuration: 过期时间
+func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error {
+	key := r.refreshTokenKey(userUUID, deviceID)
+	// RefreshToken 直接存储原始值
+	return r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
+}
+
+// VerifyAccessToken 验证 AccessToken 是否有效
+// 返回 true 表示 Token 有效且未被踢出
+func (r *deviceRepositoryImpl) VerifyAccessToken(ctx context.Context, userUUID, deviceID, accessToken string) (bool, error) {
+	key := r.accessTokenKey(userUUID, deviceID)
+	storedHash, err := r.redisClient.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			// Key 不存在，说明 Token 已过期或被踢出
+			return false, nil
+		}
+		return false, err
+	}
+
+	// 比对 MD5 哈希
+	currentHash := md5Hash(accessToken)
+	return storedHash == currentHash, nil
+}
+
+// GetRefreshToken 获取 RefreshToken
+func (r *deviceRepositoryImpl) GetRefreshToken(ctx context.Context, userUUID, deviceID string) (string, error) {
+	key := r.refreshTokenKey(userUUID, deviceID)
+	return r.redisClient.Get(ctx, key).Result()
+}
+
+// DeleteTokens 删除设备的所有 Token（用于踢出设备）
+func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, deviceID string) error {
+	atKey := r.accessTokenKey(userUUID, deviceID)
+	rtKey := r.refreshTokenKey(userUUID, deviceID)
+
+	pipe := r.redisClient.Pipeline()
+	pipe.Del(ctx, atKey)
+	pipe.Del(ctx, rtKey)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 // UpdateOnlineStatus 更新在线状态

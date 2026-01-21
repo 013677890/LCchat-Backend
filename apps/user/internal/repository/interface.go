@@ -173,6 +173,9 @@ type IDeviceRepository interface {
 	// GetByDeviceID 根据设备ID获取会话
 	GetByDeviceID(ctx context.Context, userUUID, deviceID string) (*model.DeviceSession, error)
 
+	// UpsertSession 创建或更新设备会话（Upsert）
+	UpsertSession(ctx context.Context, session *model.DeviceSession) error
+
 	// UpdateOnlineStatus 更新在线状态
 	UpdateOnlineStatus(ctx context.Context, userUUID, deviceID string, status int8) error
 
@@ -193,4 +196,21 @@ type IDeviceRepository interface {
 
 	// DeleteByUserUUID 删除用户所有设备会话（登出所有设备）
 	DeleteByUserUUID(ctx context.Context, userUUID string) error
+
+	// ==================== Redis Token 管理 ====================
+
+	// StoreAccessToken 将 AccessToken 存入 Redis
+	StoreAccessToken(ctx context.Context, userUUID, deviceID, accessToken string, expireDuration time.Duration) error
+
+	// StoreRefreshToken 将 RefreshToken 存入 Redis
+	StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error
+
+	// VerifyAccessToken 验证 AccessToken 是否有效
+	VerifyAccessToken(ctx context.Context, userUUID, deviceID, accessToken string) (bool, error)
+
+	// GetRefreshToken 获取 RefreshToken
+	GetRefreshToken(ctx context.Context, userUUID, deviceID string) (string, error)
+
+	// DeleteTokens 删除设备的所有 Token（用于踢出设备）
+	DeleteTokens(ctx context.Context, userUUID, deviceID string) error
 }

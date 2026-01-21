@@ -4,17 +4,19 @@ import (
 	"ChatServer/model"
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // authRepositoryImpl 认证相关数据访问层实现
 type authRepositoryImpl struct {
 	db *gorm.DB
+	redisClient *redis.Client
 }
 
 // NewAuthRepository 创建认证仓储实例
-func NewAuthRepository(db *gorm.DB) IAuthRepository {
-	return &authRepositoryImpl{db: db}
+func NewAuthRepository(db *gorm.DB, redisClient *redis.Client) IAuthRepository {
+	return &authRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // GetByPhone 根据手机号查询用户信息
