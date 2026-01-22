@@ -54,6 +54,7 @@ func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
 			user := public.Group("/user")
 			{
 				user.POST("/login", authHandler.Login)
+				user.POST("/register", authHandler.Register)
 			}
 		}
 

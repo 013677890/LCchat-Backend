@@ -68,7 +68,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
 		} else {
 			logger.Error(ctx, "查询用户失败",
-				logger.String("account", utils.MaskEmail(req.Account)),
 				logger.ErrorField("error", err),
 			)
 			return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
@@ -104,7 +103,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	accessToken, err := util.GenerateToken(user.Uuid, deviceID)
 	if err != nil {
 		logger.Error(ctx, "生成访问令牌失败",
-			logger.String("user_uuid", user.Uuid),
 			logger.ErrorField("error", err),
 		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
@@ -116,8 +114,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	// 8. 写入 Redis（AccessToken 和 RefreshToken）
 	if err := s.deviceRepo.StoreAccessToken(ctx, user.Uuid, deviceID, accessToken, util.AccessExpire); err != nil {
 		logger.Error(ctx, "AccessToken 写入 Redis 失败",
-			logger.String("user_uuid", user.Uuid),
-			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
@@ -125,8 +121,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.Uuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
 		logger.Error(ctx, "RefreshToken 写入 Redis 失败",
-			logger.String("user_uuid", user.Uuid),
-			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
@@ -146,8 +140,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
 		logger.Error(ctx, "设备会话落库失败",
-			logger.String("user_uuid", user.Uuid),
-			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
 		// 注意：设备会话落库失败不应该阻止登录成功，因为 Token 已经生成
@@ -156,11 +148,8 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	// 10. 登录成功
 	logger.Info(ctx, "用户登录成功",
-		logger.String("user_uuid", user.Uuid),
 		logger.String("account", utils.MaskPhone(req.Account)),
-		logger.String("device_id", deviceID),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
-		logger.String("client_ip", clientIP),
 	)
 
 	return &pb.LoginResponse{

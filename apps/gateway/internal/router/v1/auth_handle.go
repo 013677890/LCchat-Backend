@@ -83,3 +83,45 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 5. 返回成功响应
 	result.Success(c, loginResp)
 }
+
+// Register 用户注册接口
+// @Summary 用户注册
+// @Description 用户通过邮箱和密码注册
+// @Tags 认证接口
+// @Accept json
+// @Produce json
+// @Param request body dto.RegisterRequest true "注册请求"
+// @Success 200 {object} dto.RegisterResponse
+// @Router /api/v1/public/register [post]
+func (h *AuthHandler) Register(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定请求数据
+	var req dto.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 调用服务层处理业务逻辑（依赖注入）
+	registerResp, err := h.authService.Register(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败（如密码错误、账号锁定等）
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "注册服务内部错误",
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 5. 返回成功响应
+	result.Success(c, registerResp)
+}

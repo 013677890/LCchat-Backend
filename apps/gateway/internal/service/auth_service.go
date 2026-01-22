@@ -60,27 +60,13 @@ func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, devi
 		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
 	}
 
-	/*
-	// 4. 生成访问令牌
-	accessToken, err := s.generateAccessToken(ctx, grpcResp.UserInfo.Uuid, deviceId)
-	if err != nil {
-		return nil, &BusinessError{
-			Code:    consts.CodeInternalError,
-			Message: "生成访问令牌失败",
-		}
-	}
-
-	// 5. 生成刷新令牌
-	refreshToken, err := s.generateRefreshToken(ctx, grpcResp.UserInfo.Uuid, deviceId)
-	if err != nil {
-		return nil, &BusinessError{
-			Code:    consts.CodeInternalError,
-			Message: "生成刷新令牌失败",
-		}
-	}
-*/
-
 	return dto.ConvertLoginResponseFromProto(grpcResp), nil
 }
 
-
+// Register 用户注册
+// ctx: 请求上下文
+// req: 注册请求
+// 返回: 完整的注册响应（包含Token和用户信息）
+func (s *AuthServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error) {
+	return nil, nil
+}

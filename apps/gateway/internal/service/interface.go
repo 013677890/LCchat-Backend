@@ -16,4 +16,9 @@ type AuthService interface {
 	// deviceId: 设备唯一标识
 	// 返回: 完整的登录响应（包含Token和用户信息）
 	Login(ctx context.Context, req *dto.LoginRequest, deviceId string) (*dto.LoginResponse, error)
+	// Register 用户注册
+	// ctx: 请求上下文
+	// req: 注册请求
+	// 返回: 完整的注册响应（包含Token和用户信息）
+	Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error)
 }
