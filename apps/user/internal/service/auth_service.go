@@ -16,7 +16,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"gorm.io/gorm"
 )
 
 // authServiceImpl 认证服务实现
@@ -55,10 +54,14 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 		logger.String("nickname", req.Nickname),
 		logger.String("telephone", req.Telephone),
 	)
-	
+
 	// 1. 校验验证码
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
 	if err != nil {
+		// 判断是 Redis Key 不存在还是其他错误
+		if errors.Is(err, repository.ErrRedisNil) {
+			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+		}
 		logger.Error(ctx, "校验验证码失败",
 			logger.ErrorField("error", err),
 		)
@@ -67,7 +70,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 	if !isValid {
 		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
 	}
-	
+
 	// 2. 创建用户
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -79,27 +82,37 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 	}
 	// 将密码哈希化
 	user := &model.UserInfo{
-		Uuid: util.GenIDString(),
-		Email: req.Email,
-		Password: string(hashedPassword),
-		Nickname: req.Nickname,
+		Uuid:      util.GenIDString(),
+		Email:     req.Email,
+		Password:  string(hashedPassword),
+		Nickname:  req.Nickname,
 		Telephone: req.Telephone,
-		Status: 0,
-		IsAdmin: 0,
+		Status:    0,
+		IsAdmin:   0,
 	}
 	var return_user *model.UserInfo
 	// 向数据库中插入
-	if return_user,err = s.authRepo.Create(ctx, user); err != nil {
-		// 如果是唯一索引冲突错误，返回用户已存在
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
+	if return_user, err = s.authRepo.Create(ctx, user); err != nil {
+		// 使用 errors.Is 判断是否是唯一键冲突
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			logger.Warn(ctx, "用户已存在",
+				logger.String("email", req.Email),
+				logger.ErrorField("error", err), // 这里会包含原始的 GORM 错误信息
+			)
 			return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeUserAlreadyExist))
 		}
+
+		// 其他数据库错误
+		logger.Error(ctx, "创建用户失败",
+			logger.String("email", req.Email),
+			logger.ErrorField("error", err),
+		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
 	return &pb.RegisterResponse{
-		UserUuid: return_user.Uuid,
-		Nickname: return_user.Nickname,
-		Email: return_user.Email,
+		UserUuid:  return_user.Uuid,
+		Nickname:  return_user.Nickname,
+		Email:     return_user.Email,
 		Telephone: return_user.Telephone,
 	}, nil
 }
@@ -127,14 +140,16 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	// 1. 根据账号查询用户（邮箱）
 	user, err := s.authRepo.GetByEmail(ctx, req.Account)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 使用 errors.Is 判断错误类型
+		if errors.Is(err, repository.ErrRecordNotFound) {
 			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
-		} else {
-			logger.Error(ctx, "查询用户失败",
-				logger.ErrorField("error", err),
-			)
-			return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 		}
+
+		// 其他数据库错误
+		logger.Error(ctx, "查询用户失败",
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
 
 	// 2. 校验用户状态

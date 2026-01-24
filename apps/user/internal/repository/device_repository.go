@@ -41,7 +41,11 @@ func md5Hash(s string) string {
 
 // Create 创建设备会话
 func (r *deviceRepositoryImpl) Create(ctx context.Context, session *model.DeviceSession) error {
-	return r.db.WithContext(ctx).Create(session).Error
+	err := r.db.WithContext(ctx).Create(session).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	return nil
 }
 
 // GetByUserUUID 获取用户的所有设备会话
@@ -56,7 +60,7 @@ func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, devi
 		Where("user_uuid = ? AND device_id = ?", userUUID, deviceID).
 		First(&session).Error
 	if err != nil {
-		return nil, err
+		return nil, WrapDBError(err)
 	}
 	return &session, nil
 }
@@ -64,10 +68,10 @@ func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, devi
 // UpsertSession 创建或更新设备会话（Upsert）
 func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model.DeviceSession) error {
 	now := time.Now()
-	
+
 	// 直接执行 INSERT ... ON DUPLICATE KEY UPDATE
 	// 当唯一索引冲突时（user_uuid + device_id 已存在），执行 UPDATE
-	return r.db.WithContext(ctx).
+	err := r.db.WithContext(ctx).
 		Exec(`
 			INSERT INTO device_session (
 				user_uuid, device_id, device_name, platform, 
@@ -82,10 +86,15 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 				last_seen_at = VALUES(last_seen_at),
 				status = 0,
 				updated_at = VALUES(updated_at)
-		`, 
+		`,
 			session.UserUuid, session.DeviceId, session.DeviceName, session.Platform,
 			session.AppVersion, session.IP, session.UserAgent, now, now, now,
 		).Error
+
+	if err != nil {
+		return WrapDBError(err)
+	}
+	return nil
 }
 
 // StoreAccessToken 将 AccessToken 存入 Redis
@@ -97,7 +106,11 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 	key := r.accessTokenKey(userUUID, deviceID)
 	// 存储 MD5 哈希值以节省内存
 	value := md5Hash(accessToken)
-	return r.redisClient.Set(ctx, key, value, expireDuration).Err()
+	err := r.redisClient.Set(ctx, key, value, expireDuration).Err()
+	if err != nil {
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // StoreRefreshToken 将 RefreshToken 存入 Redis
@@ -108,7 +121,11 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error {
 	key := r.refreshTokenKey(userUUID, deviceID)
 	// RefreshToken 直接存储原始值
-	return r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
+	err := r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
+	if err != nil {
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // VerifyAccessToken 验证 AccessToken 是否有效
@@ -121,7 +138,7 @@ func (r *deviceRepositoryImpl) VerifyAccessToken(ctx context.Context, userUUID, 
 			// Key 不存在，说明 Token 已过期或被踢出
 			return false, nil
 		}
-		return false, err
+		return false, WrapRedisError(err)
 	}
 
 	// 比对 MD5 哈希
@@ -132,7 +149,11 @@ func (r *deviceRepositoryImpl) VerifyAccessToken(ctx context.Context, userUUID, 
 // GetRefreshToken 获取 RefreshToken
 func (r *deviceRepositoryImpl) GetRefreshToken(ctx context.Context, userUUID, deviceID string) (string, error) {
 	key := r.refreshTokenKey(userUUID, deviceID)
-	return r.redisClient.Get(ctx, key).Result()
+	result, err := r.redisClient.Get(ctx, key).Result()
+	if err != nil {
+		return "", WrapRedisError(err)
+	}
+	return result, nil
 }
 
 // DeleteTokens 删除设备的所有 Token（用于踢出设备）
@@ -144,7 +165,10 @@ func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, devic
 	pipe.Del(ctx, atKey)
 	pipe.Del(ctx, rtKey)
 	_, err := pipe.Exec(ctx)
-	return err
+	if err != nil {
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // UpdateOnlineStatus 更新在线状态

@@ -11,7 +11,7 @@ import (
 
 // authRepositoryImpl 认证相关数据访问层实现
 type authRepositoryImpl struct {
-	db *gorm.DB
+	db          *gorm.DB
 	redisClient *redis.Client
 }
 
@@ -28,8 +28,9 @@ func (r *authRepositoryImpl) GetByPhone(ctx context.Context, telephone string) (
 // GetByEmail 根据邮箱查询用户信息
 func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*model.UserInfo, error) {
 	var user model.UserInfo
-	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
-		return nil, err
+	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
+	if err != nil {
+		return nil, WrapDBError(err)
 	}
 	return &user, nil
 }
@@ -40,7 +41,7 @@ func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verify
 	verifyCodeKey := fmt.Sprintf("user:verify_code:%s", email)
 	verifyCodeValue, err := r.redisClient.Get(ctx, verifyCodeKey).Result()
 	if err != nil {
-		return false, err
+		return false, WrapRedisError(err)
 	}
 	return verifyCodeValue == verifyCode, nil
 }
@@ -57,10 +58,11 @@ func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 
 // Create 创建新用户
 func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
-    if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
-        return nil, err
-    }
-    return user, nil
+	err := r.db.WithContext(ctx).Create(user).Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+	return user, nil
 }
 
 // UpdateLastLogin 更新最后登录时间
