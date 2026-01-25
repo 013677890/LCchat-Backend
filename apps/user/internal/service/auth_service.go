@@ -480,8 +480,43 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 }
 
 // Logout 用户登出
+// 业务流程：
+//  1. 从 context 中获取 user_uuid（由 JWT 中间件解析）
+//  2. 删除 Redis 中的 Access Token 和 Refresh Token
+//  3. 返回成功
+//
+// 错误码映射：
+//   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) error {
-	return status.Error(codes.Unimplemented, "登出功能暂未实现")
+	// 记录登出请求
+	logger.Info(ctx, "用户登出请求",
+		logger.String("device_id", req.DeviceId),
+	)
+
+	// 1. 从 context 中获取 user_uuid
+	userUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || userUUID == "" {
+		logger.Error(ctx, "从 context 中获取 user_uuid 失败")
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 2. 删除 Redis 中的 Token
+	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
+		logger.Error(ctx, "删除 Token 失败",
+			logger.String("user_uuid", userUUID),
+			logger.String("device_id", req.DeviceId),
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 3. 登出成功
+	logger.Info(ctx, "用户登出成功",
+		logger.String("user_uuid", userUUID),
+		logger.String("device_id", req.DeviceId),
+	)
+
+	return nil
 }
 
 // ResetPassword 重置密码

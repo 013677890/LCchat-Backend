@@ -60,9 +60,13 @@ func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
 		}
 
 		// 需要认证的接口
-		_ = api.Group("/auth")
-		//auth.Use(middleware.JWTAuthMiddleware()) // 应用 JWT 认证中间件  测试环境下不启用
-		// TODO: 添加需要认证的接口
+		auth := api.Group("/auth")
+		auth.Use(middleware.JWTAuthMiddleware()) // 应用 JWT 认证中间件  测试环境下不启用
+		// 认证相关接口
+		auth.POST("/logout", authHandler.Logout)
+
+		// 用户相关接口（预留，后续添加需要认证的用户接口）
+		_ = api.Group("/user")
 	}
 
 	return r

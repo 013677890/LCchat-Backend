@@ -33,4 +33,10 @@ type AuthService interface {
 	// deviceId: 设备唯一标识
 	// 返回: 完整的登录响应（包含Token和用户信息）
 	LoginByCode(ctx context.Context, req *dto.LoginByCodeRequest, deviceId string) (*dto.LoginByCodeResponse, error)
+
+	// Logout 用户登出
+	// ctx: 请求上下文
+	// req: 登出请求
+	// 返回: 登出响应
+	Logout(ctx context.Context, req *dto.LogoutRequest) (*dto.LogoutResponse, error)
 }
