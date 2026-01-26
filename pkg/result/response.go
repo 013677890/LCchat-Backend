@@ -4,6 +4,7 @@ import (
 	"ChatServer/consts" // 你的错误码定义包
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,6 +15,7 @@ type Response struct {
 	Message string      `json:"message"`
 	Data    interface{} `json:"data"`
 	TraceId string      `json:"trace_id"`
+	Timestamp int64     `json:"timestamp"` //时间戳
 }
 
 var responsePool = &sync.Pool{
@@ -29,6 +31,7 @@ func GetResponse() *Response {
 	resp.Message = ""
 	resp.Data = nil
 	resp.TraceId = ""
+	resp.Timestamp = 0
 	return resp
 }
 
@@ -62,6 +65,7 @@ func Result(c *gin.Context, data interface{}, message string, code int) {
 	resp.Message = message
 	resp.Data = data
 	resp.TraceId = traceId
+	resp.Timestamp = time.Now().Unix()
 
 	c.JSON(httpStatus, resp)
 
