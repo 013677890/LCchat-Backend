@@ -103,3 +103,51 @@ func (h *UserHandler) GetOtherProfile(c *gin.Context) {
 	// 4. 返回成功响应
 	result.Success(c, profileResp)
 }
+
+// UpdateProfile 更新基本信息接口
+// @Summary 更新基本信息
+// @Description 更新个人基本信息（昵称、性别、生日、签名）
+// @Tags 用户信息接口
+// @Accept json
+// @Produce json
+// @Param request body dto.UpdateProfileRequest true "更新基本信息请求"
+// @Success 200 {object} dto.UpdateProfileResponse
+// @Router /api/v1/user/profile [put]
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定请求数据
+	var req dto.UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 至少提供一个字段
+	if req.Nickname == "" && req.Gender == 0 && req.Birthday == "" && req.Signature == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 3. 调用服务层处理业务逻辑（依赖注入）
+	profileResp, err := h.userService.UpdateProfile(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败（如昵称已被使用等）
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "更新基本信息服务内部错误",
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 4. 返回成功响应
+	result.Success(c, profileResp)
+}

@@ -7,7 +7,9 @@ import (
 	"ChatServer/consts"
 	"ChatServer/pkg/logger"
 	"context"
+	"regexp"
 	"strconv"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -101,8 +103,86 @@ func (s *userServiceImpl) GetOtherProfile(ctx context.Context, req *pb.GetOtherP
 }
 
 // UpdateProfile 更新基本信息
+// 业务流程：
+//  1. 从context中获取用户UUID
+//  2. 验证请求参数（至少提供一个字段）
+//  3. 如果更新昵称，检查昵称是否已被使用（排除自己）
+//  4. 更新基本信息
+//  5. 查询更新后的用户信息
+//  6. 转换为Protobuf格式并返回
+//
+// 错误码映射：
+//   - codes.NotFound: 用户不存在
+//   - codes.AlreadyExists: 昵称已被使用
+//   - codes.InvalidArgument: 参数验证失败
+//   - codes.Internal: 系统内部错误
 func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRequest) (*pb.UpdateProfileResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "更新基本信息功能暂未实现")
+	// 1. 从context中获取用户UUID
+	userUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || userUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 2. 验证请求参数（至少提供一个字段）
+	if req.Nickname == "" && req.Birthday == "" && req.Signature == "" && req.Gender == 0 {
+		logger.Warn(ctx, "更新基本信息请求参数为空")
+		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	// 2.1 如果提供了生日，验证生日格式
+	if req.Birthday != "" {
+		// 验证生日格式 (YYYY-MM-DD)
+		birthdayPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+		if !birthdayPattern.MatchString(req.Birthday) {
+			logger.Warn(ctx, "生日格式错误",
+				logger.String("birthday", req.Birthday),
+			)
+			return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeBirthdayFormatError))
+		}
+
+		// 验证生日是否是有效日期
+		_, err := time.Parse("2006-01-02", req.Birthday)
+		if err != nil {
+			logger.Warn(ctx, "生日日期无效",
+				logger.String("birthday", req.Birthday),
+				logger.ErrorField("error", err),
+			)
+			return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeBirthdayFormatError))
+		}
+	}
+
+	// 3. 更新基本信息
+	err := s.userRepo.UpdateBasicInfo(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
+	if err != nil {
+		logger.Error(ctx, "更新基本信息失败",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 4. 查询更新后的用户信息
+	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
+	if err != nil {
+		logger.Error(ctx, "查询更新后的用户信息失败",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	if userInfo == nil {
+		logger.Warn(ctx, "用户不存在",
+			logger.String("user_uuid", userUUID),
+		)
+		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+	}
+
+	// 5. 转换为Protobuf格式并返回
+	return &pb.UpdateProfileResponse{
+		UserInfo: converter.ModelToProtoUserInfo(userInfo),
+	}, nil
 }
 
 // UploadAvatar 上传头像

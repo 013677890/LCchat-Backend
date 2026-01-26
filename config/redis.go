@@ -15,6 +15,11 @@ type RedisConfig struct {
 	WriteTimeout time.Duration `json:"writeTimeout" yaml:"writeTimeout"` // 写超时
 	PoolTimeout  time.Duration `json:"poolTimeout" yaml:"poolTimeout"`   // 从池获取连接超时
 	ConnMaxIdle  time.Duration `json:"connMaxIdle" yaml:"connMaxIdle"`   // 连接最大空闲时间（对应 go-redis ConnMaxIdleTime）
+	// 重试
+	RetryOnConnectFailure bool `json:"retryOnConnectFailure" yaml:"retryOnConnectFailure"` // 连接失败时重试
+	MaxRetries int `json:"maxRetries" yaml:"maxRetries"` // 最大重试次数
+	MinRetryBackoff time.Duration `json:"minRetryBackoff" yaml:"minRetryBackoff"` // 最小重试间隔
+	MaxRetryBackoff time.Duration `json:"maxRetryBackoff" yaml:"maxRetryBackoff"` // 最大重试间隔
 }
 
 // DefaultRedisConfig 返回本地开发的默认配置。
@@ -31,5 +36,9 @@ func DefaultRedisConfig() RedisConfig {
 		WriteTimeout: 1 * time.Second,
 		PoolTimeout:  4 * time.Second,
 		ConnMaxIdle:  5 * time.Minute,
+		RetryOnConnectFailure: true,
+		MaxRetries: 3,
+		MinRetryBackoff: 8 * time.Millisecond,  // 最小重试间隔8ms
+		MaxRetryBackoff: 512 * time.Millisecond,  // 最大重试间隔512ms
 	}
 }

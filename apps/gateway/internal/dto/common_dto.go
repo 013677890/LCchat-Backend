@@ -13,7 +13,7 @@ type UserInfo struct {
 	Telephone string `json:"telephone"` // 手机号
 	Email     string `json:"email"`     // 邮箱
 	Avatar    string `json:"avatar"`    // 头像
-	Gender    int8   `json:"gender"`    // 性别(0:男 1:女 2:未知)
+	Gender    int8   `json:"gender"`    // 性别(1:男 2:女 3:未知)
 	Signature string `json:"signature"` // 个性签名
 	Birthday  string `json:"birthday"`  // 生日(YYYY-MM-DD)
 	Status    int8   `json:"status"`    // 状态(0:正常 1:禁用)

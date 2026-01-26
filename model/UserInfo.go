@@ -12,7 +12,7 @@ type UserInfo struct {
 	Telephone     string         `gorm:"column:telephone;uniqueIndex;not null;type:varchar(20);comment:电话"`
 	Email         string         `gorm:"column:email;type:varchar(100);comment:邮箱"`
 	Avatar        string         `gorm:"column:avatar;type:varchar(255);default:'';not null;comment:头像"`
-	Gender        int8           `gorm:"column:gender;comment:性别,0.男 1.女 2.未知"`
+	Gender        int8           `gorm:"column:gender;comment:性别,1.男 2.女 3.未知"`
 	Signature     string         `gorm:"column:signature;type:varchar(100);comment:个性签名"`
 	Password      string         `gorm:"column:password;type:char(60);not null;comment:密码"`
 	Birthday      string         `gorm:"column:birthday;type:date;comment:生日"`

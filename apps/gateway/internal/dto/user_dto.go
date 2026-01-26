@@ -27,10 +27,10 @@ type GetOtherProfileResponse struct {
 
 // UpdateProfileRequest 更新基本信息请求 DTO
 type UpdateProfileRequest struct {
-	Nickname  string `json:"nickname" binding:"required,max=20"`    // 昵称
-	Gender    int32  `json:"gender" binding:"oneof=0 1 2"`          // 性别(0:男 1:女 2:未知)
-	Birthday  string `json:"birthday" binding:"omitempty"`          // 生日(YYYY-MM-DD)
-	Signature string `json:"signature" binding:"omitempty,max=100"` // 个性签名
+	Nickname  string `json:"nickname" binding:"omitempty,min=2,max=20"` // 昵称(2-20字符)
+	Gender    int32  `json:"gender" binding:"omitempty,oneof=1 2 3"`    // 性别(1:男 2:女 3:未知)
+	Birthday  string `json:"birthday" binding:"omitempty"`              // 生日(YYYY-MM-DD)
+	Signature string `json:"signature" binding:"omitempty,max=100"`     // 个性签名
 }
 
 // UpdateProfileResponse 更新基本信息响应 DTO

@@ -41,7 +41,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 		}
 	}
 	if err != nil && err != redis.Nil {
-		LogRedisError(ctx, err)// 记录日志 降级处理
+		LogRedisError(ctx, err) // 记录日志 降级处理
 	}
 
 	// ==================== 2. 缓存未命中，查询 MySQL ====================
@@ -50,13 +50,13 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 存一份空到redis 5min过期
-			randomDuration := getRandomExpireTime(5*time.Minute)
+			randomDuration := getRandomExpireTime(5 * time.Minute)
 			err = r.redisClient.Set(ctx, cacheKey, "{}", randomDuration).Err()
 			if err != nil {
-				LogRedisError(ctx, err)// 记录日志 降级处理
+				LogRedisError(ctx, err) // 记录日志 降级处理
 			}
 			return nil, nil
-		}else{
+		} else {
 			return nil, WrapDBError(err)
 		}
 	}
@@ -103,7 +103,43 @@ func (r *userRepositoryImpl) UpdateAvatar(ctx context.Context, userUUID, avatar 
 
 // UpdateBasicInfo 更新基本信息
 func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) error {
-	return nil // TODO: 实现更新基本信息
+	// 构造更新字段
+	updates := map[string]interface{}{
+		"updated_at": time.Now(),
+	}
+
+	if nickname != "" {
+		updates["nickname"] = nickname
+	}
+	if signature != "" {
+		updates["signature"] = signature
+	}
+	if birthday != "" {
+		updates["birthday"] = birthday
+	}
+	if gender > 0 {
+		updates["gender"] = gender
+	}
+
+	// 执行更新
+	err := r.db.WithContext(ctx).
+		Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Updates(updates).
+		Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+
+	// 更新成功后，删除Redis缓存
+	cacheKey := fmt.Sprintf("user:info:%s", userUUID)
+	err = r.redisClient.Del(ctx, cacheKey).Err()
+	if err != nil {
+		// 缓存删除失败不影响主流程，记录日志即可
+		LogRedisError(ctx, err)
+	}
+
+	return nil
 }
 
 // UpdateEmail 更新邮箱

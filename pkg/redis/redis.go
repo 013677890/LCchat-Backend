@@ -35,6 +35,9 @@ func Build(cfg config.RedisConfig) (*goredis.Client, error) {
 		WriteTimeout:    cfg.WriteTimeout, // 写超时
 		PoolTimeout:     cfg.PoolTimeout,  // 从池获取连接超时
 		ConnMaxIdleTime: cfg.ConnMaxIdle,  // 连接最大空闲时间（对应 go-redis ConnMaxIdleTime）
+		MaxRetries: cfg.MaxRetries, // 最大重试次数
+		MinRetryBackoff: cfg.MinRetryBackoff, // 最小重试间隔
+		MaxRetryBackoff: cfg.MaxRetryBackoff, // 最大重试间隔
 	})
 
 	if err := client.Ping(context.Background()).Err(); err != nil {
