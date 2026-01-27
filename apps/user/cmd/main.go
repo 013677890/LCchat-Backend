@@ -13,11 +13,13 @@ import (
 	"ChatServer/apps/user/internal/service"
 	userpb "ChatServer/apps/user/pb"
 	"ChatServer/config"
+	"ChatServer/pkg/kafka"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/mysql"
 	pkgredis "ChatServer/pkg/redis"
 	"ChatServer/pkg/util"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -63,7 +65,57 @@ func main() {
 		)
 	}
 
-	// 4. 组装依赖 - Repository 层
+	// 4. 初始化 Kafka（仅在 Redis 可用时启动）
+	var kafkaProducer *kafka.Producer
+	var kafkaConsumer *kafka.Consumer
+	if redisClient != nil {
+		kafkaCfg := config.DefaultKafkaConfig()
+
+		// 创建 Kafka Producer
+		kafkaProducer = kafka.NewProducer(kafkaCfg.Brokers, kafkaCfg.RedisRetryTopic)
+		kafka.SetGlobalProducer(kafkaProducer)
+		logger.Info(ctx, "Kafka Producer 初始化成功",
+			logger.String("brokers", kafkaCfg.Brokers[0]),
+			logger.String("topic", kafkaCfg.RedisRetryTopic),
+		)
+
+		// 创建 Kafka Consumer
+		kafkaConsumer = kafka.NewConsumer(
+			kafkaCfg.Brokers,
+			kafkaCfg.RedisRetryTopic,
+			kafkaCfg.ConsumerConfig.GroupID,
+			redisClient,
+			kafkaProducer,
+		)
+
+		// 启动 Kafka Consumer（在后台 goroutine 中运行）
+		go func() {
+			consumerLogger := &kafkaLoggerAdapter{}
+			logger.Info(ctx, "Kafka Consumer 启动中",
+				logger.String("topic", kafkaCfg.RedisRetryTopic),
+				logger.String("group_id", kafkaCfg.ConsumerConfig.GroupID),
+			)
+			if err := kafkaConsumer.Start(ctx, consumerLogger); err != nil {
+				logger.Error(ctx, "Kafka Consumer 运行错误", logger.ErrorField("error", err))
+			}
+		}()
+
+		// 确保程序退出时关闭 Kafka 连接
+		defer func() {
+			if kafkaProducer != nil {
+				if err := kafkaProducer.Close(); err != nil {
+					logger.Error(ctx, "关闭 Kafka Producer 失败", logger.ErrorField("error", err))
+				}
+			}
+			if kafkaConsumer != nil {
+				if err := kafkaConsumer.Close(); err != nil {
+					logger.Error(ctx, "关闭 Kafka Consumer 失败", logger.ErrorField("error", err))
+				}
+			}
+		}()
+	}
+
+	// 5. 组装依赖 - Repository 层
 	authRepo := repository.NewAuthRepository(db, redisClient)
 	userRepo := repository.NewUserRepository(db, redisClient)
 	friendRepo := repository.NewFriendRepository(db, redisClient)
@@ -71,24 +123,24 @@ func main() {
 	blacklistRepo := repository.NewBlacklistRepository(db, redisClient)
 	deviceRepo := repository.NewDeviceRepository(db, redisClient)
 
-	// 5. 组装依赖 - Service 层
+	// 6. 组装依赖 - Service 层
 	authService := service.NewAuthService(authRepo, deviceRepo)
 	userService := service.NewUserService(userRepo)
 	friendService := service.NewFriendService(userRepo, friendRepo, applyRepo)
 	blacklistService := service.NewBlacklistService(blacklistRepo)
 	deviceService := service.NewDeviceService(deviceRepo)
 
-	// 6. 组装依赖 - Handler 层
+	// 7. 组装依赖 - Handler 层
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService, userService, friendService, deviceService)
 	friendHandler := handler.NewFriendHandler(friendService)
 	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
 	deviceHandler := handler.NewDeviceHandler(deviceService)
 
-	// 7.初始化小组件
-	util.InitSnowflake(1)//雪花算法
+	// 8. 初始化小组件
+	util.InitSnowflake(1) // 雪花算法
 
-	// 8. 启动 gRPC Server
+	// 9. 启动 gRPC Server
 	opts := server.Options{
 		Address:          ":9090",
 		EnableHealth:     true,
@@ -121,7 +173,7 @@ func main() {
 		log.Fatalf("启动gRPC服务失败: %v", err)
 	}
 
-	// 9. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
+	// 10. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", interceptors.GetMetricsHandler())
 
@@ -142,4 +194,30 @@ func main() {
 		logger.String("grpc_address", opts.Address),
 		logger.String("metrics_address", metricsAddr),
 	)
+}
+
+// ==================== Kafka Logger Adapter ====================
+
+// kafkaLoggerAdapter 将 pkg/logger 适配到 kafka.Logger 接口
+type kafkaLoggerAdapter struct{}
+
+func (a *kafkaLoggerAdapter) Info(ctx context.Context, msg string, fields map[string]interface{}) {
+	logger.Info(ctx, msg, convertFieldsToZap(fields)...)
+}
+
+func (a *kafkaLoggerAdapter) Error(ctx context.Context, msg string, fields map[string]interface{}) {
+	logger.Error(ctx, msg, convertFieldsToZap(fields)...)
+}
+
+// convertFieldsToZap 将 map[string]interface{} 转换为 zap.Field 切片
+func convertFieldsToZap(fields map[string]interface{}) []zap.Field {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	zapFields := make([]zap.Field, 0, len(fields))
+	for k, v := range fields {
+		zapFields = append(zapFields, zap.Any(k, v))
+	}
+	return zapFields
 }

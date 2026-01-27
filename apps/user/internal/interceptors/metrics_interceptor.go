@@ -28,7 +28,7 @@ var (
 			Name:    "grpc_request_duration_seconds", // 优化：后缀改为 _seconds
 			Help:    "gRPC request latency in seconds",
 			// 优化：使用秒级分桶 (5ms 到 5s)
-			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
 		},
 		[]string{"method"},
 	)
