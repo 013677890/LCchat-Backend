@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"ChatServer/apps/user/mq"
 	"ChatServer/model"
 	"context"
 	"crypto/md5"
@@ -108,6 +109,11 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 	value := md5Hash(accessToken)
 	err := r.redisClient.Set(ctx, key, value, expireDuration).Err()
 	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildSetTask(key, value, expireDuration).
+			WithSource("DeviceRepository.StoreAccessToken").
+			WithMaxRetries(5) // AccessToken 存储重要，增加重试次数
+		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
 	return nil
@@ -123,6 +129,11 @@ func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, 
 	// RefreshToken 直接存储原始值
 	err := r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
 	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildSetTask(key, refreshToken, expireDuration).
+			WithSource("DeviceRepository.StoreRefreshToken").
+			WithMaxRetries(5) // RefreshToken 存储重要，增加重试次数
+		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
 	return nil
@@ -166,6 +177,15 @@ func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, devic
 	pipe.Del(ctx, rtKey)
 	_, err := pipe.Exec(ctx)
 	if err != nil {
+		// 发送到重试队列（Pipeline）
+		cmds := []mq.RedisCmd{
+			{Command: "del", Args: []interface{}{atKey}},
+			{Command: "del", Args: []interface{}{rtKey}},
+		}
+		task := mq.BuildPipelineTask(cmds).
+			WithSource("DeviceRepository.DeleteTokens").
+			WithMaxRetries(5) // Token 删除重要，增加重试次数
+		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
 	return nil

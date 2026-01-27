@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"ChatServer/apps/user/mq"
 	"ChatServer/model"
 	"context"
 	"encoding/json"
@@ -53,7 +54,10 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 			randomDuration := getRandomExpireTime(5 * time.Minute)
 			err = r.redisClient.Set(ctx, cacheKey, "{}", randomDuration).Err()
 			if err != nil {
-				LogRedisError(ctx, err) // 记录日志 降级处理
+				// 发送到重试队列
+				task := mq.BuildSetTask(cacheKey, "{}", randomDuration).
+					WithSource("UserRepository.GetByUUID.EmptyCache")
+				LogAndRetryRedisError(ctx, task, err)
 			}
 			return nil, nil
 		} else {
@@ -72,9 +76,13 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	// 存入缓存，设置过期时间为 1 小时（+-5min缓冲）
 	// 随机时间防止缓存雪崩
 	randomDuration := time.Duration(rand.Intn(10)) * time.Minute
-	err = r.redisClient.Set(ctx, cacheKey, userJSON, 1*time.Hour-randomDuration).Err()
+	ttl := 1*time.Hour - randomDuration
+	err = r.redisClient.Set(ctx, cacheKey, userJSON, ttl).Err()
 	if err != nil {
-		// 存入缓存失败，不影响主流程，只返回数据库数据
+		// 发送到重试队列，不影响主流程
+		task := mq.BuildSetTask(cacheKey, string(userJSON), ttl).
+			WithSource("UserRepository.GetByUUID.SetCache")
+		LogAndRetryRedisError(ctx, task, err)
 		return &user, nil
 	}
 
@@ -135,8 +143,10 @@ func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID strin
 	cacheKey := fmt.Sprintf("user:info:%s", userUUID)
 	err = r.redisClient.Del(ctx, cacheKey).Err()
 	if err != nil {
-		// 缓存删除失败不影响主流程，记录日志即可
-		LogRedisError(ctx, err)
+		// 发送到重试队列
+		task := mq.BuildDelTask(cacheKey).
+			WithSource("UserRepository.UpdateNickname")
+		LogAndRetryRedisError(ctx, task, err)
 	}
 
 	return nil
@@ -183,8 +193,10 @@ func (r *userRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 	cacheKey := fmt.Sprintf("user:info:%s", userUUID)
 	err = r.redisClient.Del(ctx, cacheKey).Err()
 	if err != nil {
-		// 缓存删除失败不影响主流程，记录日志即可
-		LogRedisError(ctx, err)
+		// 发送到重试队列
+		task := mq.BuildDelTask(cacheKey).
+			WithSource("UserRepository.UpdatePassword")
+		LogAndRetryRedisError(ctx, task, err)
 	}
 
 	return nil

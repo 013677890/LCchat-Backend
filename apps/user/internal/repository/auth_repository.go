@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"ChatServer/apps/user/mq"
 	"ChatServer/model"
 	"context"
 	"fmt"
@@ -58,6 +59,11 @@ func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyC
 	// 使用 Set 方法设置值并指定过期时间
 	err := r.redisClient.Set(ctx, verifyCodeKey, verifyCode, expireDuration).Err()
 	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildSetTask(verifyCodeKey, verifyCode, expireDuration).
+			WithSource("AuthRepository.StoreVerifyCode").
+			WithMaxRetries(5) // 验证码存储重要，增加重试次数
+		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
 	return nil
@@ -70,6 +76,11 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	verifyCodeKey := fmt.Sprintf("user:verify_code:%s:%d", email, codeType)
 	err := r.redisClient.Del(ctx, verifyCodeKey).Err()
 	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildDelTask(verifyCodeKey).
+			WithSource("AuthRepository.DeleteVerifyCode").
+			WithMaxRetries(5) // 验证码删除重要，增加重试次数
+		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
 	return nil

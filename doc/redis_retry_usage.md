@@ -11,13 +11,32 @@ Repository 层
     ↓ (Redis 操作失败)
 LogAndRetryRedisError()
     ↓
+mq.SendRedisTask()
+    ↓
 Kafka Producer (发送任务到队列)
     ↓
 redis-retry-queue (Kafka Topic)
     ↓
-Kafka Consumer (后台消费)
+RedisRetryConsumer (后台消费)
     ↓
 重新执行 Redis 操作
+```
+
+## 代码结构
+
+```
+pkg/kafka/                     # 通用 Kafka 组件
+├── producer.go                # 通用 Kafka 生产者
+├── consumer.go                # 通用 Kafka 消费者
+└── logger_adapter.go          # 日志适配器
+
+apps/user/mq/                  # Redis 重试业务逻辑
+├── redis_task.go              # RedisTask 定义 + 构造器
+├── redis_consumer.go          # Redis 重试消费者
+└── manager.go                 # 全局 Producer 管理
+
+apps/user/internal/repository/
+└── errors.go                  # LogAndRetryRedisError 函数
 ```
 
 ## 配置
@@ -39,6 +58,8 @@ Kafka Producer 和 Consumer 在 `apps/user/cmd/main.go` 中自动初始化，无
 ### 场景 1: 简单的 DEL 操作
 
 ```go
+import "ChatServer/apps/user/mq"
+
 func (r *UserRepository) DeleteUserCache(ctx context.Context, userUUID string) error {
     key := fmt.Sprintf("user:info:%s", userUUID)
     
@@ -46,7 +67,7 @@ func (r *UserRepository) DeleteUserCache(ctx context.Context, userUUID string) e
     err := r.redis.Del(ctx, key).Err()
     if err != nil {
         // 构造重试任务
-        task := kafka.BuildDelTask(key).
+        task := mq.BuildDelTask(key).
             WithSource("UserRepository.DeleteUserCache")
         
         // 发送到重试队列
@@ -69,7 +90,7 @@ func (r *DeviceRepository) SaveToken(ctx context.Context, deviceID string, token
     err := r.redis.Set(ctx, key, token, ttl).Err()
     if err != nil {
         // 构造重试任务
-        task := kafka.BuildSetTask(key, token, ttl).
+        task := mq.BuildSetTask(key, token, ttl).
             WithSource("DeviceRepository.SaveToken")
         
         // 发送到重试队列
@@ -82,35 +103,12 @@ func (r *DeviceRepository) SaveToken(ctx context.Context, deviceID string, token
 }
 ```
 
-### 场景 3: HSET 操作
-
-```go
-func (r *UserRepository) UpdateUserField(ctx context.Context, userUUID string, field string, value interface{}) error {
-    key := fmt.Sprintf("user:profile:%s", userUUID)
-    
-    // 执行 Redis HSET 操作
-    err := r.redis.HSet(ctx, key, field, value).Err()
-    if err != nil {
-        // 构造重试任务
-        task := kafka.BuildHSetTask(key, field, value).
-            WithSource("UserRepository.UpdateUserField")
-        
-        // 发送到重试队列
-        LogAndRetryRedisError(ctx, task, err)
-        
-        return WrapRedisError(err)
-    }
-    
-    return nil
-}
-```
-
-### 场景 4: Pipeline 批量操作
+### 场景 3: Pipeline 批量操作
 
 ```go
 func (r *UserRepository) DeleteUserCacheAndRelation(ctx context.Context, userUUID string) error {
     // 准备 Pipeline 命令
-    cmds := []kafka.RedisCmd{
+    cmds := []mq.RedisCmd{
         {Command: "del", Args: []interface{}{fmt.Sprintf("user:info:%s", userUUID)}},
         {Command: "del", Args: []interface{}{fmt.Sprintf("user:relation:%s", userUUID)}},
         {Command: "del", Args: []interface{}{fmt.Sprintf("user:session:%s", userUUID)}},
@@ -128,42 +126,8 @@ func (r *UserRepository) DeleteUserCacheAndRelation(ctx context.Context, userUUI
     _, err := pipe.Exec(ctx)
     if err != nil {
         // 构造重试任务
-        task := kafka.BuildPipelineTask(cmds).
+        task := mq.BuildPipelineTask(cmds).
             WithSource("UserRepository.DeleteUserCacheAndRelation")
-        
-        // 发送到重试队列
-        LogAndRetryRedisError(ctx, task, err)
-        
-        return WrapRedisError(err)
-    }
-    
-    return nil
-}
-```
-
-### 场景 5: Lua 脚本
-
-```go
-func (r *FriendRepository) AtomicAddFriend(ctx context.Context, userUUID, friendUUID string) error {
-    // Lua 脚本（原子性添加好友关系）
-    script := `
-        redis.call('sadd', KEYS[1], ARGV[1])
-        redis.call('sadd', KEYS[2], ARGV[2])
-        return 1
-    `
-    
-    keys := []string{
-        fmt.Sprintf("user:friends:%s", userUUID),
-        fmt.Sprintf("user:friends:%s", friendUUID),
-    }
-    args := []interface{}{friendUUID, userUUID}
-    
-    // 执行 Lua 脚本
-    err := r.redis.Eval(ctx, script, keys, args...).Err()
-    if err != nil {
-        // 构造重试任务
-        task := kafka.BuildLuaTask(script, keys, args...).
-            WithSource("FriendRepository.AtomicAddFriend")
         
         // 发送到重试队列
         LogAndRetryRedisError(ctx, task, err)
@@ -181,21 +145,21 @@ func (r *FriendRepository) AtomicAddFriend(ctx context.Context, userUUID, friend
 
 | 函数 | 用途 | 示例 |
 |------|------|------|
-| `BuildDelTask(key)` | 删除键 | `BuildDelTask("user:1")` |
-| `BuildSetTask(key, val, ttl)` | 设置键值（带TTL） | `BuildSetTask("token:123", "abc", 5*time.Minute)` |
-| `BuildHSetTask(key, field, value)` | Hash 字段设置 | `BuildHSetTask("user:1", "name", "Alice")` |
-| `BuildHDelTask(key, fields...)` | Hash 字段删除 | `BuildHDelTask("user:1", "cache", "temp")` |
-| `BuildSAddTask(key, members...)` | Set 添加成员 | `BuildSAddTask("friends:1", "user2", "user3")` |
-| `BuildSRemTask(key, members...)` | Set 删除成员 | `BuildSRemTask("friends:1", "user2")` |
-| `BuildPipelineTask(cmds)` | Pipeline 批量操作 | 见场景4 |
-| `BuildLuaTask(script, keys, args)` | Lua 脚本执行 | 见场景5 |
+| `mq.BuildDelTask(key)` | 删除键 | `mq.BuildDelTask("user:1")` |
+| `mq.BuildSetTask(key, val, ttl)` | 设置键值（带TTL） | `mq.BuildSetTask("token:123", "abc", 5*time.Minute)` |
+| `mq.BuildHSetTask(key, field, value)` | Hash 字段设置 | `mq.BuildHSetTask("user:1", "name", "Alice")` |
+| `mq.BuildHDelTask(key, fields...)` | Hash 字段删除 | `mq.BuildHDelTask("user:1", "cache", "temp")` |
+| `mq.BuildSAddTask(key, members...)` | Set 添加成员 | `mq.BuildSAddTask("friends:1", "user2", "user3")` |
+| `mq.BuildSRemTask(key, members...)` | Set 删除成员 | `mq.BuildSRemTask("friends:1", "user2")` |
+| `mq.BuildPipelineTask(cmds)` | Pipeline 批量操作 | 见场景3 |
+| `mq.BuildLuaTask(script, keys, args)` | Lua 脚本执行 | 见完整文档 |
 
 ### 链式方法
 
-所有构造器返回的 `RedisTask` 都支持以下链式方法：
+所有构造器返回的 `mq.RedisTask` 都支持以下链式方法：
 
 ```go
-task := kafka.BuildDelTask("user:1").
+task := mq.BuildDelTask("user:1").
     WithContext(ctx).              // 添加上下文信息（trace_id, user_uuid, device_id）
     WithError(err).                // 添加原始错误信息
     WithSource("UserRepo.Delete"). // 添加来源标识
@@ -241,12 +205,6 @@ task := kafka.BuildDelTask("user:1").
 }
 ```
 
-### 告警规则建议
-
-1. **Kafka 发送失败率 > 5%**：检查 Kafka 集群状态
-2. **重试任务达到最大次数 > 10次/小时**：检查 Redis 集群状态
-3. **重试队列积压 > 1000条**：考虑扩容消费者
-
 ## 注意事项
 
 ### 1. 只重试增删改操作
@@ -283,7 +241,7 @@ Redis 重试机制不保证强一致性，只保证最终一致性：
 - 建议配合 MySQL 持久化层使用
 - 关键操作应该先写 MySQL，再更新 Redis
 
-## 示例：完整的 Repository 方法
+## 完整示例：Repository 方法
 
 ```go
 func (r *UserRepository) DeleteUser(ctx context.Context, userUUID string) error {
@@ -296,7 +254,7 @@ func (r *UserRepository) DeleteUser(ctx context.Context, userUUID string) error 
     key := fmt.Sprintf("user:info:%s", userUUID)
     if err := r.redis.Del(ctx, key).Err(); err != nil {
         // 发送到重试队列，但不影响主流程
-        task := kafka.BuildDelTask(key).
+        task := mq.BuildDelTask(key).
             WithSource("UserRepository.DeleteUser")
         LogAndRetryRedisError(ctx, task, err)
         
@@ -317,7 +275,7 @@ func (r *UserRepository) DeleteUser(ctx context.Context, userUUID string) error 
 
 检查日志中是否有：
 ```
-"msg": "Redis 重试队列消费者启动"
+"msg": "Redis 重试消费者启动中"
 ```
 
 ### 任务没有被消费
@@ -332,11 +290,3 @@ func (r *UserRepository) DeleteUser(ctx context.Context, userUUID string) error 
 2. 检查网络连接
 3. 查看错误日志，确认错误原因
 4. 考虑增加重试次数或调整重试策略
-
-## 未来优化
-
-1. **支持延迟重试**：指数退避策略
-2. **死信队列**：达到最大重试次数后转移到死信队列
-3. **重试优先级**：关键操作优先重试
-4. **动态配置**：支持运行时调整重试参数
-5. **监控面板**：可视化重试队列状态

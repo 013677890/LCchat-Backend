@@ -11,6 +11,7 @@ import (
 	"ChatServer/apps/user/internal/repository"
 	"ChatServer/apps/user/internal/server"
 	"ChatServer/apps/user/internal/service"
+	"ChatServer/apps/user/mq"
 	userpb "ChatServer/apps/user/pb"
 	"ChatServer/config"
 	"ChatServer/pkg/kafka"
@@ -19,7 +20,6 @@ import (
 	pkgredis "ChatServer/pkg/redis"
 	"ChatServer/pkg/util"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -67,36 +67,37 @@ func main() {
 
 	// 4. 初始化 Kafka（仅在 Redis 可用时启动）
 	var kafkaProducer *kafka.Producer
-	var kafkaConsumer *kafka.Consumer
+	var redisConsumer *mq.RedisRetryConsumer
 	if redisClient != nil {
 		kafkaCfg := config.DefaultKafkaConfig()
 
 		// 创建 Kafka Producer
 		kafkaProducer = kafka.NewProducer(kafkaCfg.Brokers, kafkaCfg.RedisRetryTopic)
-		kafka.SetGlobalProducer(kafkaProducer)
+		mq.SetGlobalProducer(kafkaProducer)
 		logger.Info(ctx, "Kafka Producer 初始化成功",
 			logger.String("brokers", kafkaCfg.Brokers[0]),
 			logger.String("topic", kafkaCfg.RedisRetryTopic),
 		)
 
-		// 创建 Kafka Consumer
-		kafkaConsumer = kafka.NewConsumer(
+		// 创建 Redis 重试消费者
+		zapLogger := kafka.NewZapLoggerAdapter(logger.L())
+		redisConsumer = mq.NewRedisRetryConsumer(
 			kafkaCfg.Brokers,
 			kafkaCfg.RedisRetryTopic,
 			kafkaCfg.ConsumerConfig.GroupID,
 			redisClient,
 			kafkaProducer,
+			zapLogger,
 		)
 
-		// 启动 Kafka Consumer（在后台 goroutine 中运行）
+		// 启动消费者（在后台 goroutine 中运行）
 		go func() {
-			consumerLogger := &kafkaLoggerAdapter{}
-			logger.Info(ctx, "Kafka Consumer 启动中",
+			logger.Info(ctx, "Redis 重试消费者启动中",
 				logger.String("topic", kafkaCfg.RedisRetryTopic),
 				logger.String("group_id", kafkaCfg.ConsumerConfig.GroupID),
 			)
-			if err := kafkaConsumer.Start(ctx, consumerLogger); err != nil {
-				logger.Error(ctx, "Kafka Consumer 运行错误", logger.ErrorField("error", err))
+			if err := redisConsumer.Start(ctx); err != nil {
+				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 
@@ -107,9 +108,9 @@ func main() {
 					logger.Error(ctx, "关闭 Kafka Producer 失败", logger.ErrorField("error", err))
 				}
 			}
-			if kafkaConsumer != nil {
-				if err := kafkaConsumer.Close(); err != nil {
-					logger.Error(ctx, "关闭 Kafka Consumer 失败", logger.ErrorField("error", err))
+			if redisConsumer != nil {
+				if err := redisConsumer.Close(); err != nil {
+					logger.Error(ctx, "关闭 Redis 重试消费者失败", logger.ErrorField("error", err))
 				}
 			}
 		}()
@@ -194,30 +195,4 @@ func main() {
 		logger.String("grpc_address", opts.Address),
 		logger.String("metrics_address", metricsAddr),
 	)
-}
-
-// ==================== Kafka Logger Adapter ====================
-
-// kafkaLoggerAdapter 将 pkg/logger 适配到 kafka.Logger 接口
-type kafkaLoggerAdapter struct{}
-
-func (a *kafkaLoggerAdapter) Info(ctx context.Context, msg string, fields map[string]interface{}) {
-	logger.Info(ctx, msg, convertFieldsToZap(fields)...)
-}
-
-func (a *kafkaLoggerAdapter) Error(ctx context.Context, msg string, fields map[string]interface{}) {
-	logger.Error(ctx, msg, convertFieldsToZap(fields)...)
-}
-
-// convertFieldsToZap 将 map[string]interface{} 转换为 zap.Field 切片
-func convertFieldsToZap(fields map[string]interface{}) []zap.Field {
-	if len(fields) == 0 {
-		return nil
-	}
-
-	zapFields := make([]zap.Field, 0, len(fields))
-	for k, v := range fields {
-		zapFields = append(zapFields, zap.Any(k, v))
-	}
-	return zapFields
 }

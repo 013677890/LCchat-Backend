@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"ChatServer/apps/user/mq"
 	"ChatServer/model"
 	"context"
 	"fmt"
@@ -64,92 +65,106 @@ func (r *friendRepositoryImpl) GetTagList(ctx context.Context, userUUID string) 
 // IsFriend 检查是否是好友
 // 采用 Cache-Aside Pattern：优先查 Redis Set，未命中则回源 MySQL 并缓存
 func (r *friendRepositoryImpl) IsFriend(ctx context.Context, userUUID, friendUUID string) (bool, error) {
-    cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
+	cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
 
-    // ==================== 1. 组合查询 Redis (Pipeline) ====================
-    // 使用 Pipeline 一次性发送命令，减少网络 RTT
-    pipe := r.redisClient.Pipeline()
-    
-    // 命令1: 检查 Key 是否存在 (区分缓存命中/未命中)
-    existsCmd := pipe.Exists(ctx, cacheKey)
-    // 命令2: 检查是否是好友 (只有 Key 存在时此结果才有效)
-    isMemberCmd := pipe.SIsMember(ctx, cacheKey, friendUUID)
-    
-    // 概率续期优化：1% 的概率在读取时顺便续期
-    // 无论 Key 是否存在，Expire 都是安全的 (不存在则返回0)
-    if getRandomBool(0.01) {
-         pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
-    }
+	// ==================== 1. 组合查询 Redis (Pipeline) ====================
+	// 使用 Pipeline 一次性发送命令，减少网络 RTT
+	pipe := r.redisClient.Pipeline()
 
-    _, err := pipe.Exec(ctx)
+	// 命令1: 检查 Key 是否存在 (区分缓存命中/未命中)
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	// 命令2: 检查是否是好友 (只有 Key 存在时此结果才有效)
+	isMemberCmd := pipe.SIsMember(ctx, cacheKey, friendUUID)
 
-    if err != nil && err != redis.Nil {
-        // Redis 挂了，记录日志，降级去查 DB
-        LogRedisError(ctx, err)
-    } else if err == nil {
-        // Redis 正常返回
-        // 核心逻辑：先看 Key 在不在
-        if existsCmd.Val() > 0 {
-            // Case A: 缓存命中 (Hit)
-            // 此时 Redis 是权威的。SIsMember 说 false 就是 false (绝对非好友)。
-            // 注意：哪怕 Set 里只有 "__EMPTY__"，SIsMember 也会正确返回 false。
-            return isMemberCmd.Val(), nil
-        }
-        // Case B: 缓存未命中 (Miss) -> Exists 返回 0
-        // 代码继续往下走，去查数据库
-    }
+	// 概率续期优化：1% 的概率在读取时顺便续期
+	// 无论 Key 是否存在，Expire 都是安全的 (不存在则返回0)
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+	}
 
-    // ==================== 2. 缓存未命中，回源查询 MySQL ====================
-    var relations []model.UserRelation
-    err = r.db.WithContext(ctx).
-        Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0).
-        Find(&relations).Error
+	_, err := pipe.Exec(ctx)
 
-    if err != nil {
-        return false, WrapDBError(err)
-    }
+	if err != nil && err != redis.Nil {
+		// Redis 挂了，记录日志，降级去查 DB
+		LogRedisError(ctx, err)
+	} else if err == nil {
+		// Redis 正常返回
+		// 核心逻辑：先看 Key 在不在
+		if existsCmd.Val() > 0 {
+			// Case A: 缓存命中 (Hit)
+			// 此时 Redis 是权威的。SIsMember 说 false 就是 false (绝对非好友)。
+			// 注意：哪怕 Set 里只有 "__EMPTY__"，SIsMember 也会正确返回 false。
+			return isMemberCmd.Val(), nil
+		}
+		// Case B: 缓存未命中 (Miss) -> Exists 返回 0
+		// 代码继续往下走，去查数据库
+	}
 
-    // ==================== 3. 重建缓存 (保持 Set 类型) ====================
-    pipe = r.redisClient.Pipeline()
-    pipe.Del(ctx, cacheKey) // 清理旧数据
+	// ==================== 2. 缓存未命中，回源查询 MySQL ====================
+	var relations []model.UserRelation
+	err = r.db.WithContext(ctx).
+		Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0).
+		Find(&relations).Error
 
-    if len(relations) == 0 {
-        // [修复类型冲突] 空列表也用 Set，写入特殊标记
-        pipe.SAdd(ctx, cacheKey, "__EMPTY__")
-        // 空值缓存时间短一点 (5分钟)
-        pipe.Expire(ctx, cacheKey, 5*time.Minute)
-    } else {
-        // 提取 UUID
-        friendUUIDs := make([]interface{}, len(relations))
-        // 优化：顺便在内存里判断一下结果，省得最后再遍历
-        isFriendFound := false
-        for i, relation := range relations {
-            friendUUIDs[i] = relation.PeerUuid
-            if relation.PeerUuid == friendUUID {
-                isFriendFound = true
-            }
-        }
-        
-        pipe.SAdd(ctx, cacheKey, friendUUIDs...)
-        pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
-        
-        // 异步执行写入，不需要等待结果，让接口响应更快
-        // 这里的 context 最好用 context.Background() 或者是 detach 的 ctx，防止主请求超时取消导致缓存没写入
-        // 但为了简单，先用 ctx
-        if _, err := pipe.Exec(ctx); err != nil {
-            LogRedisError(ctx, err)
-        }
-        
-        return isFriendFound, nil
-    }
+	if err != nil {
+		return false, WrapDBError(err)
+	}
 
-    // 执行空值的 Pipeline
-    if _, err := pipe.Exec(ctx); err != nil {
-        LogRedisError(ctx, err)
-    }
+	// ==================== 3. 重建缓存 (保持 Set 类型) ====================
+	pipe = r.redisClient.Pipeline()
+	pipe.Del(ctx, cacheKey) // 清理旧数据
 
-    // 如果是空列表，那肯定不是好友
-    return false, nil
+	if len(relations) == 0 {
+		// [修复类型冲突] 空列表也用 Set，写入特殊标记
+		pipe.SAdd(ctx, cacheKey, "__EMPTY__")
+		// 空值缓存时间短一点 (5分钟)
+		pipe.Expire(ctx, cacheKey, 5*time.Minute)
+	} else {
+		// 提取 UUID
+		friendUUIDs := make([]interface{}, len(relations))
+		// 优化：顺便在内存里判断一下结果，省得最后再遍历
+		isFriendFound := false
+		for i, relation := range relations {
+			friendUUIDs[i] = relation.PeerUuid
+			if relation.PeerUuid == friendUUID {
+				isFriendFound = true
+			}
+		}
+
+		pipe.SAdd(ctx, cacheKey, friendUUIDs...)
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+
+		// 异步执行写入，不需要等待结果，让接口响应更快
+		if _, err := pipe.Exec(ctx); err != nil {
+			// 发送到重试队列
+			cmds := []mq.RedisCmd{
+				{Command: "del", Args: []interface{}{cacheKey}},
+				{Command: "sadd", Args: append([]interface{}{cacheKey}, friendUUIDs...)},
+				{Command: "expire", Args: []interface{}{cacheKey, int(getRandomExpireTime(24 * time.Hour).Seconds())}},
+			}
+			task := mq.BuildPipelineTask(cmds).
+				WithSource("FriendRepository.IsFriend.RebuildCache")
+			LogAndRetryRedisError(ctx, task, err)
+		}
+
+		return isFriendFound, nil
+	}
+
+	// 执行空值的 Pipeline
+	if _, err := pipe.Exec(ctx); err != nil {
+		// 发送到重试队列
+		cmds := []mq.RedisCmd{
+			{Command: "del", Args: []interface{}{cacheKey}},
+			{Command: "sadd", Args: []interface{}{cacheKey, "__EMPTY__"}},
+			{Command: "expire", Args: []interface{}{cacheKey, int((5 * time.Minute).Seconds())}},
+		}
+		task := mq.BuildPipelineTask(cmds).
+			WithSource("FriendRepository.IsFriend.RebuildEmptyCache")
+		LogAndRetryRedisError(ctx, task, err)
+	}
+
+	// 如果是空列表，那肯定不是好友
+	return false, nil
 }
 
 // GetRelationStatus 获取关系状态
