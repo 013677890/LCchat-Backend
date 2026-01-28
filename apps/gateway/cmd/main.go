@@ -8,6 +8,7 @@ import (
 	"ChatServer/apps/gateway/internal/service"
 	"ChatServer/config"
 	"ChatServer/pkg/logger"
+	pkgredis "ChatServer/pkg/redis"
 	"context"
 	"fmt"
 	"net/http"
@@ -22,7 +23,23 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// 1. 初始化日志
+	// 1. 初始化 Redis
+	redisCfg := config.DefaultRedisConfig()
+	redisClient, err := pkgredis.Build(redisCfg)
+	if err != nil {
+		logger.Error(ctx, "初始化 Redis 失败",
+			logger.ErrorField("error", err),
+		)
+		// Redis 初始化失败不阻塞启动，但限流功能将降级
+		redisClient = nil
+	} else {
+		pkgredis.ReplaceGlobal(redisClient)
+		logger.Info(ctx, "Redis 初始化成功",
+			logger.String("addr", redisCfg.Addr),
+		)
+	}
+
+	// 2. 初始化日志
 	cfg := config.DefaultLoggerConfig()
 	l, err := logger.Build(cfg)
 	if err != nil {
@@ -50,6 +67,19 @@ func main() {
 	logger.Info(ctx, "用户限流器初始化完成",
 		logger.Float64("requests_per_second", 10),
 		logger.Int("burst", 20),
+	)
+
+	// 3. 初始化 Redis IP 限流器
+	// 参数说明：
+	//   - rate: 每秒产生的令牌数 (10.0 表示每秒10个令牌)
+	//   - burst: 令牌桶容量 (20 表示桶最多20个令牌)
+	//   - redisClient: Redis 客户端实例
+	// 示例：10 req/s, burst 20 表示正常情况下每秒10个请求，短时间内最多20个
+	middleware.InitRedisRateLimiter(10.0, 20, redisClient)
+	logger.Info(ctx, "Redis IP 限流器初始化完成",
+		logger.Float64("rate", 10.0),
+		logger.Int("burst", 20),
+		logger.String("blacklist_key", "gateway:blacklist:ips"),
 	)
 
 	// 3. 初始化 gRPC 客户端（依赖注入）
