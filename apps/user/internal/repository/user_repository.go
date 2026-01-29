@@ -96,7 +96,21 @@ func (r *userRepositoryImpl) GetByPhone(ctx context.Context, telephone string) (
 
 // BatchGetByUUIDs 批量查询用户信息
 func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserInfo, error) {
-	return nil, nil // TODO: 实现批量查询用户信息
+	if len(uuids) == 0 {
+		return []*model.UserInfo{}, nil
+	}
+
+	// 查询数据库
+	var users []*model.UserInfo
+	err := r.db.WithContext(ctx).
+		Where("uuid IN ? AND deleted_at IS NULL", uuids).
+		Find(&users).
+		Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+
+	return users, nil
 }
 
 // Update 更新用户信息

@@ -466,6 +466,57 @@ func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccou
 }
 
 // BatchGetProfile 批量获取用户信息
+// BatchGetProfile 批量获取用户信息
+// 业务流程：
+//  1. 验证请求参数（UUID列表不为空，最多100个）
+//  2. 批量查询用户信息
+//  3. 转换为SimpleUserInfo格式并返回
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误
+//   - codes.Internal: 系统内部错误
 func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "批量获取用户信息功能暂未实现")
+	// 1. 验证请求参数
+	if len(req.UserUuids) == 0 {
+		logger.Warn(ctx, "批量获取用户信息请求为空")
+		return &pb.BatchGetProfileResponse{
+			Users: []*pb.SimpleUserInfo{},
+		}, nil
+	}
+
+	if len(req.UserUuids) > 100 {
+		logger.Warn(ctx, "批量获取用户信息超过最大限制",
+			logger.Int("count", len(req.UserUuids)),
+		)
+		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	// 2. 批量查询用户信息
+	users, err := s.userRepo.BatchGetByUUIDs(ctx, req.UserUuids)
+	if err != nil {
+		logger.Error(ctx, "批量查询用户信息失败",
+			logger.Int("count", len(req.UserUuids)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 3. 转换为SimpleUserInfo格式
+	simpleUsers := make([]*pb.SimpleUserInfo, 0, len(users))
+	for _, user := range users {
+		simpleUsers = append(simpleUsers, &pb.SimpleUserInfo{
+			Uuid:     user.Uuid,
+			Nickname: user.Nickname,
+			Avatar:   user.Avatar,
+		})
+	}
+
+	logger.Info(ctx, "批量获取用户信息成功",
+		logger.Int("requested", len(req.UserUuids)),
+		logger.Int("found", len(simpleUsers)),
+	)
+
+	return &pb.BatchGetProfileResponse{
+		Users: simpleUsers,
+	}, nil
 }

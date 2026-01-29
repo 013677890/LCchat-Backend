@@ -363,3 +363,60 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 		"avatarUrl": avatarURL,
 	})
 }
+
+// BatchGetProfile 批量获取用户信息接口
+// @Summary 批量获取用户信息
+// @Description 根据用户UUID列表批量查询用户基本信息（uuid、昵称、头像）
+// @Tags 用户信息接口
+// @Accept json
+// @Produce json
+// @Param request body dto.BatchGetProfileRequest true "批量获取用户信息请求"
+// @Success 200 {object} dto.BatchGetProfileResponse
+// @Router /api/v1/auth/user/batch-profile [post]
+func (h *UserHandler) BatchGetProfile(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定请求数据
+	var req dto.BatchGetProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 验证用户UUID列表数量（最多100个）
+	if len(req.UserUUIDs) == 0 {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	if len(req.UserUUIDs) > 100 {
+		logger.Warn(ctx, "批量获取用户信息超过最大限制",
+			logger.Int("count", len(req.UserUUIDs)),
+		)
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 3. 调用服务层处理业务逻辑（依赖注入）
+	batchResp, err := h.userService.BatchGetProfile(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "批量获取用户信息服务内部错误",
+			logger.Int("count", len(req.UserUUIDs)),
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 4. 返回成功响应
+	result.Success(c, batchResp)
+}

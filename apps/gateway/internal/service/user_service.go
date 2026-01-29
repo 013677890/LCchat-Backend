@@ -27,6 +27,8 @@ type UserService interface {
 	ChangePassword(ctx context.Context, req *dto.ChangePasswordRequest) error
 	// ChangeEmail 绑定/换绑邮箱
 	ChangeEmail(ctx context.Context, req *dto.ChangeEmailRequest) (*dto.ChangeEmailResponse, error)
+	// BatchGetProfile 批量获取用户信息
+	BatchGetProfile(ctx context.Context, req *dto.BatchGetProfileRequest) (*dto.BatchGetProfileResponse, error)
 }
 
 // UserServiceImpl 用户服务实现
@@ -302,4 +304,40 @@ func (s *UserServiceImpl) UploadAvatar(ctx context.Context, avatarURL string) (s
 	)
 
 	return grpcResp.AvatarUrl, nil
+}
+
+// BatchGetProfile 批量获取用户信息
+// ctx: 请求上下文
+// req: 批量获取用户信息请求
+// 返回: 用户信息列表
+func (s *UserServiceImpl) BatchGetProfile(ctx context.Context, req *dto.BatchGetProfileRequest) (*dto.BatchGetProfileResponse, error) {
+	startTime := time.Now()
+
+	// 1. 转换 DTO 为 Protobuf 请求
+	grpcReq := dto.ConvertToProtoBatchGetProfileRequest(req)
+
+	// 2. 调用用户服务批量获取用户信息(gRPC)
+	grpcResp, err := s.userClient.BatchGetProfile(ctx, grpcReq)
+	if err != nil {
+		// gRPC 调用失败，提取业务错误码
+		code := utils.ExtractErrorCode(err)
+		// 记录错误日志
+		logger.Error(ctx, "调用用户服务批量获取用户信息 gRPC 失败",
+			logger.Int("count", len(req.UserUUIDs)),
+			logger.ErrorField("error", err),
+			logger.Int("business_code", code),
+			logger.String("business_message", consts.GetMessage(code)),
+			logger.Duration("duration", time.Since(startTime)),
+		)
+		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
+		return nil, err
+	}
+
+	logger.Info(ctx, "批量获取用户信息成功",
+		logger.Int("requested", len(req.UserUUIDs)),
+		logger.Int("found", len(grpcResp.Users)),
+		logger.Duration("duration", time.Since(startTime)),
+	)
+
+	return dto.ConvertBatchGetProfileResponseFromProto(grpcResp), nil
 }
