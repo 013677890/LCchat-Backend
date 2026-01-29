@@ -100,8 +100,8 @@ type ParseQRCodeResponse struct {
 
 // DeleteAccountRequest 注销账号请求 DTO
 type DeleteAccountRequest struct {
-	Password string `json:"password" binding:"required,min=8,max=16"` // 密码
-	Reason   string `json:"reason" binding:"omitempty,max=200"`       // 注销原因
+	Password string `json:"password" binding:"required,min=6,max=20"` // 密码
+	Reason   string `json:"reason" binding:"omitempty,max=255"`       // 注销原因
 }
 
 // DeleteAccountResponse 注销账号响应 DTO

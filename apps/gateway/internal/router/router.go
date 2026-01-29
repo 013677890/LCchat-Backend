@@ -100,6 +100,9 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler) *gin.E
 				user.POST("/change-email",
 					middleware.UserRateLimitMiddlewareWithConfig(2.0, 5),
 					userHandler.ChangeEmail)
+				user.POST("/delete-account",
+					middleware.UserRateLimitMiddlewareWithConfig(2.0, 5),
+					userHandler.DeleteAccount)
 
 				user.POST("/logout", authHandler.Logout)
 			}

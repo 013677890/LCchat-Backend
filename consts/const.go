@@ -93,6 +93,8 @@ const (
 	CodeReasonTooLong = 11025 // 理由过长
 	// 邮箱不存在
 	CodeEmailNotFound = 11026 // 邮箱不存在
+	// 账号已注销
+	CodeAccountDeleted = 11029 // 账号已注销
 )
 
 // 好友模块错误 (12xxx)
@@ -267,6 +269,7 @@ var CodeMessage = map[int]string{
 	CodeRemarkTooLong:         "备注过长",
 	CodeReasonTooLong:         "理由过长",
 	CodeEmailNotFound:         "邮箱不存在",
+	CodeAccountDeleted:        "账号已注销",
 
 	// 好友模块
 	CodeAlreadyFriend:         "已经是好友",

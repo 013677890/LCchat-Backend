@@ -526,8 +526,79 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 }
 
 // DeleteAccount 注销账号
+// 业务流程：
+//  1. 从context中获取用户UUID
+//  2. 查询用户信息
+//  3. 验证密码是否正确
+//  4. 软删除用户（设置 deleted_at 时间戳）
+//  5. 删除用户的所有设备会话（登出所有设备）
+//  6. 返回注销时间和恢复截止时间
+//
+// 错误码映射：
+//   - codes.NotFound: 用户不存在
+//   - codes.Unauthenticated: 密码错误
+//   - codes.Internal: 系统内部错误
 func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "注销账号功能暂未实现")
+	// 1. 从context中获取用户UUID
+	userUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || userUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 2. 查询用户信息
+	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
+	if err != nil {
+		logger.Error(ctx, "查询用户信息失败",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	if userInfo == nil {
+		logger.Warn(ctx, "用户不存在",
+			logger.String("user_uuid", userUUID),
+		)
+		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+	}
+
+	// 3. 校验密码是否正确
+	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.Password))
+	if err != nil {
+		logger.Warn(ctx, "密码错误",
+			logger.String("user_uuid", userUUID),
+		)
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodePasswordError))
+	}
+
+	// 4. 软删除用户（设置 deleted_at 时间戳）
+	err = s.userRepo.Delete(ctx, userUUID)
+	if err != nil {
+		logger.Error(ctx, "注销账号失败",
+			logger.String("user_uuid", userUUID),
+			logger.String("reason", req.Reason),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 5. 计算恢复截止时间（30天后）
+	deleteAt := time.Now()
+	recoverDeadline := deleteAt.Add(30 * 24 * time.Hour)
+
+	logger.Info(ctx, "账号注销成功",
+		logger.String("user_uuid", userUUID),
+		logger.String("reason", req.Reason),
+		logger.String("delete_at", deleteAt.Format(time.RFC3339)),
+		logger.String("recover_deadline", recoverDeadline.Format(time.RFC3339)),
+	)
+
+	// 6. 返回注销时间和恢复截止时间
+	return &pb.DeleteAccountResponse{
+		DeleteAt:        deleteAt.Format(time.RFC3339),
+		RecoverDeadline: recoverDeadline.Format(time.RFC3339),
+	}, nil
 }
 
 // BatchGetProfile 批量获取用户信息

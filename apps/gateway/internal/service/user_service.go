@@ -33,6 +33,8 @@ type UserService interface {
 	ParseQRCode(ctx context.Context, req *dto.ParseQRCodeRequest) (*dto.ParseQRCodeResponse, error)
 	// BatchGetProfile 批量获取用户信息
 	BatchGetProfile(ctx context.Context, req *dto.BatchGetProfileRequest) (*dto.BatchGetProfileResponse, error)
+	// DeleteAccount 注销账号
+	DeleteAccount(ctx context.Context, req *dto.DeleteAccountRequest) (*dto.DeleteAccountResponse, error)
 }
 
 // UserServiceImpl 用户服务实现
@@ -400,4 +402,33 @@ func (s *UserServiceImpl) ParseQRCode(ctx context.Context, req *dto.ParseQRCodeR
 	}
 
 	return dto.ConvertParseQRCodeResponseFromProto(grpcResp), nil
+}
+
+// DeleteAccount 注销账号
+// ctx: 请求上下文
+// req: 注销账号请求
+// 返回: 注销账号响应
+func (s *UserServiceImpl) DeleteAccount(ctx context.Context, req *dto.DeleteAccountRequest) (*dto.DeleteAccountResponse, error) {
+	startTime := time.Now()
+
+	// 1. 转换 DTO 为 Protobuf 请求
+	grpcReq := dto.ConvertToProtoDeleteAccountRequest(req)
+
+	// 2. 调用用户服务注销账号(gRPC)
+	grpcResp, err := s.userClient.DeleteAccount(ctx, grpcReq)
+	if err != nil {
+		// gRPC 调用失败，提取业务错误码
+		code := utils.ExtractErrorCode(err)
+		// 记录错误日志
+		logger.Error(ctx, "调用用户服务 gRPC 失败",
+			logger.ErrorField("error", err),
+			logger.Int("business_code", code),
+			logger.String("business_message", consts.GetMessage(code)),
+			logger.Duration("duration", time.Since(startTime)),
+		)
+		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
+		return nil, err
+	}
+
+	return dto.ConvertDeleteAccountResponseFromProto(grpcResp), nil
 }

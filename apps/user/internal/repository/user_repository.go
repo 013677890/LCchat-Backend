@@ -216,9 +216,29 @@ func (r *userRepositoryImpl) UpdateTelephone(ctx context.Context, userUUID, tele
 	return nil // TODO: 实现更新手机号
 }
 
-// Delete 软删除用户
+// Delete 软删除用户（注销账号）
+// 设置 deleted_at 字段，删除 Redis 缓存
 func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
-	return nil // TODO: 实现软删除用户
+	// 1. 软删除用户（GORM 会自动设置 deleted_at 时间戳）
+	err := r.db.WithContext(ctx).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Delete(&model.UserInfo{}).
+		Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+
+	// 2. 删除 Redis 缓存
+	cacheKey := fmt.Sprintf("user:info:%s", userUUID)
+	err = r.redisClient.Del(ctx, cacheKey).Err()
+	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildDelTask(cacheKey).
+			WithSource("UserRepository.Delete")
+		LogAndRetryRedisError(ctx, task, err)
+	}
+
+	return nil
 }
 
 // ExistsByPhone 检查手机号是否已存在
@@ -301,7 +321,7 @@ func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token str
 }
 
 // GetQRCodeTokenByUserUUID 根据用户 UUID 获取二维码 token和剩余时间
-func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string,time.Time, error) {
+func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error) {
 	userKey := fmt.Sprintf("user:qrcode:user:%s", userUUID)
 	pipe := r.redisClient.Pipeline()
 	pipe.Get(ctx, userKey)
