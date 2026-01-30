@@ -36,9 +36,10 @@ type DeviceInfo struct {
 
 // PaginationInfo 分页信息 DTO
 type PaginationInfo struct {
-	Page     int32 `json:"page"`     // 当前页码
-	PageSize int32 `json:"pageSize"` // 每页大小
-	Total    int64 `json:"total"`    // 总记录数
+	Page       int32 `json:"page"`       // 当前页码
+	PageSize   int32 `json:"pageSize"`   // 每页大小
+	Total      int64 `json:"total"`      // 总记录数
+	TotalPages int32 `json:"totalPages"` // 总页数
 }
 
 // ==================== 通用 DTO 转换函数 ====================
@@ -105,8 +106,9 @@ func ConvertPaginationInfoFromProto(pb *userpb.PaginationInfo) *PaginationInfo {
 		return nil
 	}
 	return &PaginationInfo{
-		Page:     pb.Page,
-		PageSize: pb.PageSize,
-		Total:    pb.Total,
+		Page:       pb.Page,
+		PageSize:   pb.PageSize,
+		Total:      pb.Total,
+		TotalPages: pb.TotalPages,
 	}
 }

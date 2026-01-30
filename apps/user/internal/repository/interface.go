@@ -102,14 +102,15 @@ type IUserRepository interface {
 
 	// GetQRCodeTokenByUserUUID 根据用户 UUID 获取二维码 token
 	GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error)
+
+	// SearchUser 搜索用户（按手机号或昵称）
+	SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error)
 }
 
 // ==================== 好友关系 Repository ====================
 
 // IFriendRepository 好友关系数据访问接口
 type IFriendRepository interface {
-	// SearchUser 搜索用户（按手机号或昵称）
-	SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error)
 
 	// GetFriendList 获取好友列表
 	GetFriendList(ctx context.Context, userUUID, groupTag string, page, pageSize int) ([]*model.UserRelation, int64, error)
@@ -134,6 +135,10 @@ type IFriendRepository interface {
 
 	// IsFriend 检查是否是好友
 	IsFriend(ctx context.Context, userUUID, friendUUID string) (bool, error)
+
+	// BatchCheckIsFriend 批量检查是否为好友（使用Redis Set优化）
+	// 返回：map[peerUUID]isFriend
+	BatchCheckIsFriend(ctx context.Context, userUUID string, peerUUIDs []string) (map[string]bool, error)
 
 	// GetRelationStatus 获取关系状态
 	GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error)

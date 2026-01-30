@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -333,4 +334,47 @@ func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userU
 	token := cmds[0].(*redis.StringCmd).Val()
 	expireTime := time.Now().Add(cmds[1].(*redis.DurationCmd).Val().Round(time.Second))
 	return token, expireTime, nil
+}
+
+// SearchUser 搜索用户（按邮箱、昵称、UUID）
+func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
+	// 计算偏移量
+	offset := (page - 1) * pageSize
+
+	// 判断关键词是否为邮箱格式（简单判断：包含@符号）
+	isEmail := strings.Contains(keyword, "@")
+
+	// 构建查询条件
+	query := r.db.WithContext(ctx).
+		Model(&model.UserInfo{}).
+		Where("deleted_at IS NULL")
+
+	if isEmail {
+		// 邮箱格式：全匹配
+		query = query.Where("email = ?", keyword)
+	} else {
+		// 非邮箱格式：模糊搜索（昵称、UUID）
+		query = query.Where("(nickname LIKE ? OR uuid LIKE ?)",
+			keyword+"%",
+			keyword+"%")
+	}
+
+	// 先查询总数
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+
+	// 查询用户列表
+	var users []*model.UserInfo
+	if err := query.
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&users).
+		Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+
+	return users, total, nil
 }

@@ -92,6 +92,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler) *gin.E
 				user.POST("/avatar", userHandler.UploadAvatar)
 				user.GET("/qrcode", userHandler.GetQRCode)
 				user.POST("/batch-profile", userHandler.BatchGetProfile)
+				user.GET("/search", userHandler.SearchUser)
 
 				// 敏感操作使用更严格的限流
 				user.POST("/change-password",

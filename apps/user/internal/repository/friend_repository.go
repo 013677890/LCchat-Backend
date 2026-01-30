@@ -22,11 +22,6 @@ func NewFriendRepository(db *gorm.DB, redisClient *redis.Client) IFriendReposito
 	return &friendRepositoryImpl{db: db, redisClient: redisClient}
 }
 
-// SearchUser 搜索用户（按手机号或昵称）
-func (r *friendRepositoryImpl) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
-	return nil, 0, nil // TODO: 实现搜索用户
-}
-
 // GetFriendList 获取好友列表
 func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, groupTag string, page, pageSize int) ([]*model.UserRelation, int64, error) {
 	return nil, 0, nil // TODO: 实现获取好友列表
@@ -175,4 +170,131 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 // SyncFriendList 增量同步好友列表
 func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, error) {
 	return nil, 0, nil // TODO: 增量同步好友列表
+}
+
+// BatchCheckIsFriend 批量检查是否为好友（使用Redis Set优化）
+// 返回：map[peerUUID]isFriend
+func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID string, peerUUIDs []string) (map[string]bool, error) {
+	if len(peerUUIDs) == 0 {
+		return make(map[string]bool), nil
+	}
+
+	// 构建 Redis Set key
+	cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
+
+	// ==================== 1. 组合查询 Redis (Pipeline) ====================
+	// 优化：使用多个 SIsMember 而不是 SMembers
+	// 好处：用户有 2000 好友，只查 2 人时，网络传输从 2000 个 UUID → 2 个 bool
+	pipe := r.redisClient.Pipeline()
+
+	// 命令1: 检查 Key 是否存在 (区分缓存命中/未命中)
+	existsCmd := pipe.Exists(ctx, cacheKey)
+
+	// 命令2: 批量检查每个 peerUUID 是否是好友
+	isMemberCmds := make([]*redis.BoolCmd, len(peerUUIDs))
+	for i, peerUUID := range peerUUIDs {
+		isMemberCmds[i] = pipe.SIsMember(ctx, cacheKey, peerUUID)
+	}
+
+	// 概率续期优化：1% 的概率在读取时顺便续期
+	// 无论 Key 是否存在，Expire 都是安全的 (不存在则返回0)
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+	}
+
+	_, err := pipe.Exec(ctx)
+
+	if err != nil && err != redis.Nil {
+		// Redis 挂了，记录日志，降级去查 DB
+		LogRedisError(ctx, err)
+	} else if err == nil {
+		// Redis 正常返回
+		// 核心逻辑：先看 Key 在不在
+		if existsCmd.Val() > 0 {
+			// Case A: 缓存命中 (Hit)
+			// 此时 Redis 是权威的，直接返回结果
+			result := make(map[string]bool, len(peerUUIDs))
+			for i, peerUUID := range peerUUIDs {
+				// 如果 SIsMember 出错，保守返回 false（后续会降级查 DB）
+				if isMemberCmds[i].Err() != nil {
+					LogRedisError(ctx, isMemberCmds[i].Err())
+					result[peerUUID] = false
+				} else {
+					result[peerUUID] = isMemberCmds[i].Val()
+				}
+			}
+			return result, nil
+		}
+		// Case B: 缓存未命中 (Miss) -> Exists 返回 0
+		// 代码继续往下走，去查数据库
+	}
+
+	// ==================== 2. 缓存未命中，回源查询 MySQL ====================
+	var relations []model.UserRelation
+	err = r.db.WithContext(ctx).
+		Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0).
+		Find(&relations).Error
+
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+
+	// ==================== 3. 统一重建缓存 (保持 Set 类型) ====================
+	// 优化：合并空列表和非空列表的 Pipeline 逻辑，避免代码重复
+	pipe = r.redisClient.Pipeline()
+	pipe.Del(ctx, cacheKey) // 清理旧数据
+
+	var cmds []mq.RedisCmd
+
+	if len(relations) == 0 {
+		// 空列表也用 Set，写入特殊标记
+		pipe.SAdd(ctx, cacheKey, "__EMPTY__")
+		// 空值缓存时间短一点 (5分钟)
+		pipe.Expire(ctx, cacheKey, 5*time.Minute)
+
+		// 构建重试队列命令
+		cmds = []mq.RedisCmd{
+			{Command: "del", Args: []interface{}{cacheKey}},
+			{Command: "sadd", Args: []interface{}{cacheKey, "__EMPTY__"}},
+			{Command: "expire", Args: []interface{}{cacheKey, int((5 * time.Minute).Seconds())}},
+		}
+	} else {
+		// 提取 UUID
+		friendUUIDs := make([]interface{}, len(relations))
+		for i, relation := range relations {
+			friendUUIDs[i] = relation.PeerUuid
+		}
+
+		pipe.SAdd(ctx, cacheKey, friendUUIDs...)
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+
+		// 构建重试队列命令
+		cmds = []mq.RedisCmd{
+			{Command: "del", Args: []interface{}{cacheKey}},
+			{Command: "sadd", Args: append([]interface{}{cacheKey}, friendUUIDs...)},
+			{Command: "expire", Args: []interface{}{cacheKey, int(getRandomExpireTime(24 * time.Hour).Seconds())}},
+		}
+	}
+
+	// 异步执行写入，不需要等待结果，让接口响应更快
+	if _, err := pipe.Exec(ctx); err != nil {
+		// 发送到重试队列
+		task := mq.BuildPipelineTask(cmds).WithSource("FriendRepository.BatchCheckIsFriend.RebuildCache")
+		LogAndRetryRedisError(ctx, task, err)
+	}
+
+	// ==================== 4. 构建返回结果 ====================
+	// 将 DB 查询到的好友集合转为 map
+	friendSet := make(map[string]bool, len(relations))
+	for _, relation := range relations {
+		friendSet[relation.PeerUuid] = true
+	}
+
+	// 构建返回结果
+	result := make(map[string]bool, len(peerUUIDs))
+	for _, peerUUID := range peerUUIDs {
+		result[peerUUID] = friendSet[peerUUID]
+	}
+
+	return result, nil
 }

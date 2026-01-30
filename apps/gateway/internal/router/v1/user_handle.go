@@ -537,3 +537,55 @@ func (h *UserHandler) DeleteAccount(c *gin.Context) {
 	// 3. 返回成功响应
 	result.Success(c, deleteResp)
 }
+
+// SearchUser 搜索用户接口
+// @Summary 搜索用户
+// @Description 通过邮箱、昵称、用户ID搜索用户
+// @Tags 用户信息接口
+// @Accept json
+// @Produce json
+// @Param keyword query string true "搜索关键词"
+// @Param page query int false "页码(默认1)"
+// @Param pageSize query int false "每页数量(默认20)"
+// @Success 200 {object} dto.SearchUserResponse
+// @Router /api/v1/auth/user/search [get]
+func (h *UserHandler) SearchUser(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定查询参数
+	var req dto.SearchUserRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 设置默认值
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 20
+	}
+
+	// 3. 调用服务层处理业务逻辑（依赖注入）
+	searchResp, err := h.userService.SearchUser(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "搜索用户服务内部错误",
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 4. 返回成功响应
+	result.Success(c, searchResp)
+}
