@@ -8,12 +8,10 @@ import (
 	"ChatServer/model"
 	"ChatServer/pkg/logger"
 	"context"
-	"errors"
 	"strconv"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"gorm.io/gorm"
 )
 
 // friendServiceImpl 好友关系服务实现
@@ -168,20 +166,19 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 	}
 
 	// 2. 检查目标用户是否存在
-	_, err := s.userRepo.GetByUUID(ctx, req.TargetUuid)
+	targetUser, err := s.userRepo.GetByUUID(ctx, req.TargetUuid)
 	if err != nil {
-		// 检查是否是用户不存在的错误
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.Warn(ctx, "目标用户不存在",
-				logger.String("target_uuid", req.TargetUuid),
-			)
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
-		}
 		logger.Error(ctx, "查询目标用户失败",
 			logger.String("target_uuid", req.TargetUuid),
 			logger.ErrorField("error", err),
 		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+	if targetUser == nil {
+		logger.Warn(ctx, "目标用户不存在",
+			logger.String("target_uuid", req.TargetUuid),
+		)
+		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
 	}
 
 	// 3. 检查不能添加自己为好友
