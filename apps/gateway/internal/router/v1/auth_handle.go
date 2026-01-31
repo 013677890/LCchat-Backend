@@ -321,8 +321,6 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 // @Success 200 {object} dto.RefreshTokenResponse
 // @Router /api/v1/public/user/refresh-token [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	ctx := middleware.NewContextWithGin(c)
-
 	// 1. 绑定请求数据
 	var req dto.RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -331,7 +329,14 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// 2. 调用服务层处理业务逻辑（依赖注入）
+	// 2. 将 user_uuid 和 device_id 写入 gin context
+	c.Set("user_uuid", req.UserUUID)
+	c.Set("device_id", req.DeviceID)
+
+	// 3. 创建带有用户信息的 context
+	ctx := middleware.NewContextWithGin(c)
+
+	// 4. 调用服务层处理业务逻辑（依赖注入）
 	resp, err := h.authService.RefreshToken(ctx, &req)
 	if err != nil {
 		// 检查是否为业务错误
@@ -349,7 +354,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// 3. 返回成功响应
+	// 5. 返回成功响应
 	result.Success(c, resp)
 }
 

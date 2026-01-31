@@ -510,39 +510,41 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequ
 
 // RefreshToken 刷新Token
 // 业务流程：
-//  1. 解析 Refresh Token（包含 user_uuid 和 device_id）
-//  2. 验证 Refresh Token 是否在 Redis 中存在
+//  1. 从 context 中获取 user_uuid 和 device_id（由 Gateway 写入）
+//  2. 验证 Refresh Token 是否在 Redis 中存在且匹配
 //  3. 生成新的 Access Token
 //  4. 更新 Redis 中的 Access Token
 //  5. 返回新的 Access Token
 //
 // 错误码映射：
 //   - codes.InvalidArgument: Refresh Token 无效
-//   - codes.DeadlineExceeded: Refresh Token 已过期
 //   - codes.NotFound: 设备会话不存在
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
 	// 记录刷新Token请求
 	logger.Info(ctx, "刷新Token请求")
 
-	// 1. 解析 Refresh Token（包含 user_uuid 和 device_id）
-	claims, err := util.ParseToken(req.RefreshToken)
-	if err != nil {
-		// Refresh Token 解析失败
-		logger.Warn(ctx, "Refresh Token 解析失败",
-			logger.ErrorField("error", err),
-		)
+	// 1. 从 context 中获取 user_uuid 和 device_id
+	userUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || userUUID == "" {
+		logger.Warn(ctx, "从 context 中获取 user_uuid 失败")
+		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
+	}
+
+	deviceID, ok := ctx.Value("device_id").(string)
+	if !ok || deviceID == "" {
+		logger.Warn(ctx, "从 context 中获取 device_id 失败")
 		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
 	}
 
 	// 2. 验证 Refresh Token 是否在 Redis 中存在
-	storedRefreshToken, err := s.deviceRepo.GetRefreshToken(ctx, claims.UserUUID, claims.DeviceID)
+	storedRefreshToken, err := s.deviceRepo.GetRefreshToken(ctx, userUUID, deviceID)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
 			logger.Warn(ctx, "Refresh Token 不存在",
-				logger.String("user_uuid", claims.UserUUID),
-				logger.String("device_id", claims.DeviceID),
+				logger.String("user_uuid", userUUID),
+				logger.String("device_id", deviceID),
 			)
 			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
 		}
@@ -555,14 +557,14 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 	// 3. 校验 Refresh Token 是否匹配
 	if storedRefreshToken != req.RefreshToken {
 		logger.Warn(ctx, "Refresh Token 不匹配",
-			logger.String("user_uuid", claims.UserUUID),
-			logger.String("device_id", claims.DeviceID),
+			logger.String("user_uuid", userUUID),
+			logger.String("device_id", deviceID),
 		)
 		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
 	}
 
 	// 4. 生成新的 Access Token
-	newAccessToken, err := util.GenerateToken(claims.UserUUID, claims.DeviceID)
+	newAccessToken, err := util.GenerateToken(userUUID, deviceID)
 	if err != nil {
 		logger.Error(ctx, "生成 Access Token 失败",
 			logger.ErrorField("error", err),
@@ -571,7 +573,7 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 	}
 
 	// 5. 更新 Redis 中的 Access Token
-	if err := s.deviceRepo.StoreAccessToken(ctx, claims.UserUUID, claims.DeviceID, newAccessToken, util.AccessExpire); err != nil {
+	if err := s.deviceRepo.StoreAccessToken(ctx, userUUID, deviceID, newAccessToken, util.AccessExpire); err != nil {
 		logger.Error(ctx, "更新 Access Token 失败",
 			logger.ErrorField("error", err),
 		)
@@ -580,8 +582,8 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 
 	// 6. 刷新成功
 	logger.Info(ctx, "Token 刷新成功",
-		logger.String("user_uuid", claims.UserUUID),
-		logger.String("device_id", claims.DeviceID),
+		logger.String("user_uuid", userUUID),
+		logger.String("device_id", deviceID),
 	)
 
 	return &pb.RefreshTokenResponse{

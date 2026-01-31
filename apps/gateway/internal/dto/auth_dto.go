@@ -80,6 +80,8 @@ type VerifyCodeResponse struct {
 
 // RefreshTokenRequest 刷新Token请求 DTO
 type RefreshTokenRequest struct {
+	UserUUID     string `json:"uuid" binding:"required,min=1"`         // 用户UUID
+	DeviceID     string `json:"device_id" binding:"required,min=1"`    // 设备ID
 	RefreshToken string `json:"refreshToken" binding:"required,min=1"` // 刷新令牌
 }
 
