@@ -111,7 +111,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 			{
 				friend.GET("/search", friendHandler.SearchUser)
 				friend.POST("/apply", friendHandler.SendFriendApply)
-				friend.GET("/apply/list", friendHandler.GetFriendApplyList)
+				friend.GET("/apply-list", friendHandler.GetFriendApplyList)
 				friend.GET("/apply/sent", friendHandler.GetSentApplyList)
 				friend.POST("/apply/handle", friendHandler.HandleFriendApply)
 				friend.GET("/apply/unread", friendHandler.GetUnreadApplyCount)

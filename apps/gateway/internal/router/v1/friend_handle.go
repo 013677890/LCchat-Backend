@@ -142,6 +142,12 @@ func (h *FriendHandler) GetFriendApplyList(c *gin.Context) {
 		return
 	}
 
+	// 1.1 如果未传 status，则查询全部状态
+	// 说明：status=0 是合法值（待处理），不能用默认值判断
+	if c.Query("status") == "" {
+		req.Status = -1
+	}
+
 	// 2. 设置默认值
 	if req.Page == 0 {
 		req.Page = 1

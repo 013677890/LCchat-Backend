@@ -302,7 +302,119 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 
 // GetFriendApplyList 获取好友申请列表
 func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetFriendApplyListRequest) (*pb.GetFriendApplyListResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取好友申请列表功能暂未实现")
+	// 从上下文获取当前用户
+	currentUserUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || currentUserUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 兜底分页参数（即使网关做了默认值，这里也防御性处理）
+	page := req.Page
+	pageSize := req.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	// 查询申请列表（status<0 表示全部状态）
+	applies, total, err := s.applyRepo.GetPendingList(ctx, currentUserUUID, int(req.Status), int(page), int(pageSize))
+	if err != nil {
+		logger.Error(ctx, "获取好友申请列表失败",
+			logger.String("user_uuid", currentUserUUID),
+			logger.Int32("status", req.Status),
+			logger.Int32("page", page),
+			logger.Int32("page_size", pageSize),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	if len(applies) == 0 {
+		// 空列表直接返回，避免后续无意义的批量查询
+		return &pb.GetFriendApplyListResponse{
+			Items: []*pb.FriendApplyItem{},
+			Pagination: &pb.PaginationInfo{
+				Page:       page,
+				PageSize:   pageSize,
+				Total:      total,
+				TotalPages: int32((total + int64(pageSize) - 1) / int64(pageSize)),
+			},
+		}, nil
+	}
+
+	// 去重收集申请人 UUID，减少批量查询压力
+	applicantSet := make(map[string]struct{}, len(applies))
+	for _, apply := range applies {
+		if apply != nil && apply.ApplicantUuid != "" {
+			applicantSet[apply.ApplicantUuid] = struct{}{}
+		}
+	}
+
+	// 构造去重后的 UUID 列表
+	applicantUUIDs := make([]string, 0, len(applicantSet))
+	for uuid := range applicantSet {
+		applicantUUIDs = append(applicantUUIDs, uuid)
+	}
+
+	// 批量查询申请人信息（昵称、头像）
+	users, err := s.userRepo.BatchGetByUUIDs(ctx, applicantUUIDs)
+	if err != nil {
+		logger.Error(ctx, "批量查询申请人信息失败",
+			logger.Int("count", len(applicantUUIDs)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 将用户信息映射到 map，便于组装响应
+	userMap := make(map[string]*model.UserInfo, len(users))
+	for _, user := range users {
+		if user != nil {
+			userMap[user.Uuid] = user
+		}
+	}
+
+	// 组装返回项（申请记录 + 申请人简要信息）
+	items := make([]*pb.FriendApplyItem, 0, len(applies))
+	for _, apply := range applies {
+		if apply == nil {
+			continue
+		}
+
+		user, ok := userMap[apply.ApplicantUuid]
+		applicantInfo := &pb.SimpleUserInfo{
+			Uuid: apply.ApplicantUuid,
+		}
+		if ok {
+			applicantInfo.Nickname = user.Nickname
+			applicantInfo.Avatar = user.Avatar
+		}
+
+		// created_at 使用毫秒时间戳（与网关 DTO 一致）
+		items = append(items, &pb.FriendApplyItem{
+			ApplyId:       apply.Id,
+			ApplicantUuid: apply.ApplicantUuid,
+			ApplicantInfo: applicantInfo,
+			Reason:        apply.Reason,
+			Source:        "",
+			Status:        int32(apply.Status),
+			IsRead:        apply.IsRead,
+			CreatedAt:     apply.CreatedAt.UnixMilli(),
+		})
+	}
+
+	return &pb.GetFriendApplyListResponse{
+		Items: items,
+		Pagination: &pb.PaginationInfo{
+			Page:       page,
+			PageSize:   pageSize,
+			Total:      total,
+			TotalPages: int32((total + int64(pageSize) - 1) / int64(pageSize)),
+		},
+	}, nil
 }
 
 // GetSentApplyList 获取发出的申请列表

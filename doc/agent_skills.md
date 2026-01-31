@@ -37,7 +37,24 @@ in this project. It is intended for AI agents and new contributors.
 - 配置：`config/async.go`，默认 `DefaultAsyncConfig()`。
 - 初始化：每个独立进程在 main 中调用 `async.Init`，并 `defer async.Release()`。
 - 上下文透传：业务层通过 `async.SetContextPropagator` 注入需要透传的字段，避免在 async 包内硬编码。
-- 安全执行：使用 `async.RunSafe` 投递任务，内部具备 panic recover + 日志记录 + 超时日志提醒。
+- **Submit vs RunSafe 区别**：
+  - `async.Submit`: 简单任务投递，无 Context 传播，无 panic 恢复
+  - `async.RunSafe`: 带 Context 传播、独立超时控制、panic recover（**推荐用于 gRPC 调用**）
+- **何时必须使用 RunSafe**：
+  - 并发调用 gRPC 服务
+  - 需要 trace_id/user_uuid 等上下文信息的异步任务
+  - 父请求可能提前取消的场景（避免 context cancelled 错误）
+
+#### 3.1 Error Handling
+- Business errors are encoded as `grpc/status` with numeric error codes in
+  the message, then extracted in gateway via `utils.ExtractErrorCode`.
+- Use `consts.IsNonServerError(code)` to decide if it is a user-facing error.
+- Log internal errors with context and return `CodeInternalError`.
+
+#### 3.2 DTO ↔ Protobuf Conversion
+- Gateway request DTOs live in `apps/gateway/internal/dto`.
+- Always convert DTOs to Protobuf using `ConvertToProto...` functions.
+- Always convert Protobuf responses to DTO using `Convert...FromProto`.
 
 #### 3.1 Error Handling
 - Business errors are encoded as `grpc/status` with numeric error codes in
@@ -57,7 +74,14 @@ in this project. It is intended for AI agents and new contributors.
 
 #### 3.4 Logging
 - Use `logger.Info/Warn/Error` and include key fields (email, device, ip).
-- Avoid logging raw password or verify codes; mask account where possible.
+- **禁止记录的敏感字段**：
+  - ❌ `password` / `new_password` / `old_password`
+  - ❌ `verify_code` / `verifyCode`
+  - ❌ 完整的 `access_token` / `refresh_token`
+- **允许脱敏后记录**：
+  - ✅ `email` → `utils.MaskEmail(email)` (显示前3位和域名)
+  - ✅ `telephone` → `utils.MaskTelephone(phone)` (显示前3后4)
+
 
 #### 3.5 Redis Usage
 - Verification codes stored in Redis with TTL (e.g., 2 minutes).
