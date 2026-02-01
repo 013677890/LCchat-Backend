@@ -166,8 +166,11 @@ type IApplyRepository interface {
 	// UpdateStatus 更新申请状态
 	UpdateStatus(ctx context.Context, id int64, status int, remark string) error
 
-	// MarkAsRead 标记申请已读
+	// MarkAsRead 标记申请已读（同步）
 	MarkAsRead(ctx context.Context, ids []int64) error
+
+	// MarkAsReadAsync 异步标记申请已读（不阻塞主请求）
+	MarkAsReadAsync(ctx context.Context, ids []int64)
 
 	// GetUnreadCount 获取未读申请数量
 	GetUnreadCount(ctx context.Context, targetUUID string) (int64, error)

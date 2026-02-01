@@ -3,6 +3,7 @@ package repository
 import (
 	"ChatServer/model"
 	"ChatServer/pkg/async"
+	"ChatServer/pkg/logger"
 	"context"
 	"fmt"
 	"time"
@@ -306,9 +307,36 @@ func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status
 	return nil // TODO: 更新申请状态
 }
 
-// MarkAsRead 标记申请已读
+// MarkAsRead 标记申请已读（同步）
 func (r *applyRepositoryImpl) MarkAsRead(ctx context.Context, ids []int64) error {
-	return nil // TODO: 标记申请已读
+	if len(ids) == 0 {
+		return nil
+	}
+	err := r.db.WithContext(ctx).
+		Model(&model.ApplyRequest{}).
+		Where("id IN ? AND is_read = ?", ids, false).
+		Update("is_read", true).Error
+	return WrapDBError(err)
+}
+
+// MarkAsReadAsync 异步标记申请已读（不阻塞主请求）
+// 批量更新，仅更新 is_read=false 的记录避免无效写入
+func (r *applyRepositoryImpl) MarkAsReadAsync(ctx context.Context, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+
+	// 使用 async.RunSafe 异步执行，自带 panic recover 和超时控制
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		err := r.db.WithContext(runCtx).
+			Model(&model.ApplyRequest{}).
+			Where("id IN ? AND is_read = ?", ids, false).
+			Update("is_read", true).Error
+		if err != nil {
+			// 异步更新失败只记录日志，不影响主流程
+			logger.Error(runCtx, "异步标记申请已读失败", logger.ErrorField("error", err))
+		}
+	}, 0) // timeout=0 使用默认 1 分钟超时
 }
 
 // GetUnreadCount 获取未读申请数量

@@ -379,9 +379,16 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 
 	// 组装返回项（申请记录 + 申请人简要信息）
 	items := make([]*pb.FriendApplyItem, 0, len(applies))
+	unreadIDs := make([]int64, 0) // 收集未读申请的 ID
+
 	for _, apply := range applies {
 		if apply == nil {
 			continue
+		}
+
+		// 收集未读申请 ID
+		if !apply.IsRead {
+			unreadIDs = append(unreadIDs, apply.Id)
 		}
 
 		user, ok := userMap[apply.ApplicantUuid]
@@ -404,6 +411,11 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 			IsRead:        apply.IsRead,
 			CreatedAt:     apply.CreatedAt.UnixMilli(),
 		})
+	}
+
+	// 异步标记已读（不阻塞响应）
+	if len(unreadIDs) > 0 {
+		s.applyRepo.MarkAsReadAsync(ctx, unreadIDs)
 	}
 
 	return &pb.GetFriendApplyListResponse{
