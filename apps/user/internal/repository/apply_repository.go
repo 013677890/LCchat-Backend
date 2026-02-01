@@ -1,12 +1,14 @@
 package repository
 
 import (
+	"context"
+	"fmt"
+	"strconv"
+	"time"
+
 	"ChatServer/model"
 	"ChatServer/pkg/async"
 	"ChatServer/pkg/logger"
-	"context"
-	"fmt"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -59,6 +61,18 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 		// Lua 脚本执行失败，记录日志但不阻塞主流程
 		// 注意：Key 不存在返回 0 不是错误，读接口会负责全量加载
 		LogRedisError(ctx, err)
+	}
+
+	// 更新好友申请未读数量（仅好友申请）
+	if apply.ApplyType == 0 && apply.TargetUuid != "" {
+		notifyKey := fmt.Sprintf("user:notify:friend_apply:unread:%s", apply.TargetUuid)
+		notifyTTL := 7 * 24 * time.Hour
+		pipe := r.redisClient.Pipeline()
+		pipe.Incr(ctx, notifyKey)
+		pipe.Expire(ctx, notifyKey, notifyTTL)
+		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+			LogRedisError(ctx, err)
+		}
 	}
 
 	return apply, nil
@@ -460,15 +474,29 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 }
 
 // MarkAsRead 标记申请已读（同步）
-func (r *applyRepositoryImpl) MarkAsRead(ctx context.Context, ids []int64) error {
-	if len(ids) == 0 {
-		return nil
+func (r *applyRepositoryImpl) MarkAsRead(ctx context.Context, targetUUID string, ids []int64) (int64, error) {
+	if len(ids) == 0 || targetUUID == "" {
+		return 0, nil
 	}
-	err := r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&model.ApplyRequest{}).
-		Where("id IN ? AND is_read = ?", ids, false).
-		Update("is_read", true).Error
-	return WrapDBError(err)
+		Where("id IN ? AND target_uuid = ? AND apply_type = ? AND is_read = ? AND deleted_at IS NULL",
+			ids, targetUUID, 0, false).
+		Update("is_read", true)
+	return result.RowsAffected, WrapDBError(result.Error)
+}
+
+// MarkAllAsRead 标记当前用户所有好友申请已读（同步）
+func (r *applyRepositoryImpl) MarkAllAsRead(ctx context.Context, targetUUID string) (int64, error) {
+	if targetUUID == "" {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&model.ApplyRequest{}).
+		Where("apply_type = ? AND target_uuid = ? AND is_read = ? AND deleted_at IS NULL",
+			0, targetUUID, false).
+		Update("is_read", true)
+	return result.RowsAffected, WrapDBError(result.Error)
 }
 
 // MarkAsReadAsync 异步标记申请已读（不阻塞主请求）
@@ -482,7 +510,7 @@ func (r *applyRepositoryImpl) MarkAsReadAsync(ctx context.Context, ids []int64) 
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		err := r.db.WithContext(runCtx).
 			Model(&model.ApplyRequest{}).
-			Where("id IN ? AND is_read = ?", ids, false).
+			Where("id IN ? AND apply_type = ? AND is_read = ? AND deleted_at IS NULL", ids, 0, false).
 			Update("is_read", true).Error
 		if err != nil {
 			// 异步更新失败只记录日志，不影响主流程
@@ -493,7 +521,50 @@ func (r *applyRepositoryImpl) MarkAsReadAsync(ctx context.Context, ids []int64) 
 
 // GetUnreadCount 获取未读申请数量
 func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID string) (int64, error) {
-	return 0, nil // TODO: 获取未读申请数量
+	if targetUUID == "" {
+		return 0, nil
+	}
+
+	notifyKey := fmt.Sprintf("user:notify:friend_apply:unread:%s", targetUUID)
+	notifyTTL := 7 * 24 * time.Hour
+	val, err := r.redisClient.Get(ctx, notifyKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return 0, nil
+		}
+		return 0, WrapRedisError(err)
+	}
+
+	count, convErr := strconv.ParseInt(val, 10, 64)
+	if convErr != nil {
+		logger.Warn(ctx, "未读数量解析失败",
+			logger.String("value", val),
+			logger.ErrorField("error", convErr),
+		)
+		return 0, nil
+	}
+	if count < 0 {
+		count = 0
+	}
+
+	// 续期（尽力而为）
+	if err := r.redisClient.Expire(ctx, notifyKey, notifyTTL).Err(); err != nil && err != redis.Nil {
+		LogRedisError(ctx, err)
+	}
+
+	return count, nil
+}
+
+// ClearUnreadCount 清除未读申请数量（红点清除）
+func (r *applyRepositoryImpl) ClearUnreadCount(ctx context.Context, targetUUID string) error {
+	if targetUUID == "" {
+		return nil
+	}
+	notifyKey := fmt.Sprintf("user:notify:friend_apply:unread:%s", targetUUID)
+	if err := r.redisClient.Del(ctx, notifyKey).Err(); err != nil && err != redis.Nil {
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // ExistsPendingRequest 检查是否存在待处理的申请

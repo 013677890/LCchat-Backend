@@ -88,6 +88,7 @@ in this project. It is intended for AI agents and new contributors.
 - Tokens stored in Redis with Access/Refresh expiry.
 - Rate limiting uses counters + TTL; avoid extending TTL on every increment.
 - When verification succeeds, delete the code to prevent reuse.
+- 简单的 key 模板/TTL 规则优先在函数内直接写明，避免额外抽象影响可读性。
 
 #### 3.6 Routing Style
 - Public routes grouped under `/api/v1/public/user/...`.

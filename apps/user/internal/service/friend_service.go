@@ -333,6 +333,13 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 	}
 
 	if len(applies) == 0 {
+		// 空列表也需要清除未读数量红点（尽力而为）
+		if err := s.applyRepo.ClearUnreadCount(ctx, currentUserUUID); err != nil {
+			logger.Warn(ctx, "清除好友申请未读数量失败",
+				logger.String("user_uuid", currentUserUUID),
+				logger.ErrorField("error", err),
+			)
+		}
 		// 空列表直接返回，避免后续无意义的批量查询
 		return &pb.GetFriendApplyListResponse{
 			Items: []*pb.FriendApplyItem{},
@@ -416,6 +423,14 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 	// 异步标记已读（不阻塞响应）
 	if len(unreadIDs) > 0 {
 		s.applyRepo.MarkAsReadAsync(ctx, unreadIDs)
+	}
+
+	// 清除未读数量红点（尽力而为）
+	if err := s.applyRepo.ClearUnreadCount(ctx, currentUserUUID); err != nil {
+		logger.Warn(ctx, "清除好友申请未读数量失败",
+			logger.String("user_uuid", currentUserUUID),
+			logger.ErrorField("error", err),
+		)
 	}
 
 	return &pb.GetFriendApplyListResponse{
@@ -633,12 +648,66 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 
 // GetUnreadApplyCount 获取未读申请数量
 func (s *friendServiceImpl) GetUnreadApplyCount(ctx context.Context, req *pb.GetUnreadApplyCountRequest) (*pb.GetUnreadApplyCountResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取未读申请数量功能暂未实现")
+	// 1. 获取当前用户 UUID
+	currentUserUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || currentUserUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 2. 只读 Redis 未读数量（不命中直接返回 0）
+	count, err := s.applyRepo.GetUnreadCount(ctx, currentUserUUID)
+	if err != nil {
+		logger.Warn(ctx, "获取好友申请未读数量失败，降级返回 0",
+			logger.String("user_uuid", currentUserUUID),
+			logger.ErrorField("error", err),
+		)
+		count = 0
+	}
+
+	return &pb.GetUnreadApplyCountResponse{
+		UnreadCount: int32(count),
+	}, nil
 }
 
 // MarkApplyAsRead 标记申请已读
 func (s *friendServiceImpl) MarkApplyAsRead(ctx context.Context, req *pb.MarkApplyAsReadRequest) error {
-	return status.Error(codes.Unimplemented, "标记申请已读功能暂未实现")
+	// 1. 获取当前用户 UUID
+	currentUserUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || currentUserUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 2. 标记已读（applyIds 为空则标记全部）
+	if len(req.ApplyIds) == 0 {
+		if _, err := s.applyRepo.MarkAllAsRead(ctx, currentUserUUID); err != nil {
+			logger.Error(ctx, "标记全部申请已读失败",
+				logger.String("user_uuid", currentUserUUID),
+				logger.ErrorField("error", err),
+			)
+			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		}
+	} else {
+		if _, err := s.applyRepo.MarkAsRead(ctx, currentUserUUID, req.ApplyIds); err != nil {
+			logger.Error(ctx, "标记申请已读失败",
+				logger.String("user_uuid", currentUserUUID),
+				logger.Int("count", len(req.ApplyIds)),
+				logger.ErrorField("error", err),
+			)
+			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		}
+	}
+
+	// 3. 清除未读数量红点（尽力而为）
+	if err := s.applyRepo.ClearUnreadCount(ctx, currentUserUUID); err != nil {
+		logger.Warn(ctx, "清除好友申请未读数量失败",
+			logger.String("user_uuid", currentUserUUID),
+			logger.ErrorField("error", err),
+		)
+	}
+
+	return nil
 }
 
 // GetFriendList 获取好友列表

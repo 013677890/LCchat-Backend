@@ -171,13 +171,19 @@ type IApplyRepository interface {
 	AcceptApplyAndCreateRelation(ctx context.Context, applyId int64, userUUID, friendUUID, remark string) (alreadyProcessed bool, err error)
 
 	// MarkAsRead 标记申请已读（同步）
-	MarkAsRead(ctx context.Context, ids []int64) error
+	MarkAsRead(ctx context.Context, targetUUID string, ids []int64) (int64, error)
+
+	// MarkAllAsRead 标记当前用户所有申请已读（同步）
+	MarkAllAsRead(ctx context.Context, targetUUID string) (int64, error)
 
 	// MarkAsReadAsync 异步标记申请已读（不阻塞主请求）
 	MarkAsReadAsync(ctx context.Context, ids []int64)
 
 	// GetUnreadCount 获取未读申请数量
 	GetUnreadCount(ctx context.Context, targetUUID string) (int64, error)
+
+	// ClearUnreadCount 清除未读申请数量（红点清除）
+	ClearUnreadCount(ctx context.Context, targetUUID string) error
 
 	// ExistsPendingRequest 检查是否存在待处理的申请
 	ExistsPendingRequest(ctx context.Context, applicantUUID, targetUUID string) (bool, error)
