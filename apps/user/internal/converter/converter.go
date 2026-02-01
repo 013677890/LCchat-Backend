@@ -116,7 +116,7 @@ func ModelToProtoFriendApplyItem(apply *model.ApplyRequest, applicant *model.Use
 		ApplyId:       apply.Id,
 		ApplicantInfo: applicantInfo,
 		Reason:        apply.Reason,
-		Source:        apply.HandleUserUuid,
+		Source:        apply.Source,
 		Status:        int32(apply.Status),
 		IsRead:        apply.IsRead,
 		CreatedAt:     apply.CreatedAt.Unix() * 1000,

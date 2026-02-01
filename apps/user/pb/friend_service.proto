@@ -91,7 +91,7 @@ message SendFriendApplyResponse {
 
 // GetFriendApplyListRequest 获取好友申请列表请求
 message GetFriendApplyListRequest {
-	int32 status = 1 [(validate.rules).int32 = {gt: 0, lte: 2}]; // 0:待处理 1:已同意 2:已拒绝
+	int32 status = 1 [(validate.rules).int32 = {gte: -1, lte: 2}]; // -1:全部 0:待处理 1:已同意 2:已拒绝
 	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
 	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
 }
@@ -116,7 +116,7 @@ message GetFriendApplyListResponse {
 
 // GetSentApplyListRequest 获取发出的申请列表请求（同GetFriendApplyListRequest，但applicant变target）
 message GetSentApplyListRequest {
-	int32 status = 1 [(validate.rules).int32 = {gt: 0, lte: 2}];
+	int32 status = 1 [(validate.rules).int32 = {gte: -1, lte: 2}];
 	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
 	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
 }
@@ -132,8 +132,12 @@ message SentApplyItem {
 	int64 apply_id = 1;
 	string target_uuid = 2;
 	SimpleUserInfo target_info = 3;
-	int32 status = 4;
-	int64 created_at = 5;
+	string reason = 4;
+	string source = 5;
+	int32 status = 6;
+	bool is_read = 7;
+	int64 created_at = 8;
+	
 }
 
 // HandleFriendApplyRequest 处理好友申请请求

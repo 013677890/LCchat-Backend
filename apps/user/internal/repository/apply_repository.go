@@ -259,7 +259,46 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 
 // GetSentList 获取发出的好友申请列表
 func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID string, status, page, pageSize int) ([]*model.ApplyRequest, int64, error) {
-	return nil, 0, nil // TODO: 获取发出的好友申请列表
+	// 兜底分页参数
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	// 基础条件：仅好友申请 + 指定申请人 + 未删除
+	query := r.db.WithContext(ctx).
+		Model(&model.ApplyRequest{}).
+		Where("apply_type = ? AND applicant_uuid = ? AND deleted_at IS NULL", 0, applicantUUID)
+
+	// status >= 0 时按指定状态过滤；否则返回全部(0/1/2)状态
+	if status >= 0 {
+		query = query.Where("status = ?", status)
+	} else {
+		query = query.Where("status IN ?", []int{0, 1, 2})
+	}
+
+	// 先查总数
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+
+	// 再查列表，按创建时间倒序
+	var applies []*model.ApplyRequest
+	if err := query.
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&applies).
+		Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+
+	return applies, total, nil
 }
 
 // UpdateStatus 更新申请状态

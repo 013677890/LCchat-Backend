@@ -85,7 +85,10 @@ type SentApplyItem struct {
 	ApplyID    int64           `json:"applyId"`    // 申请ID
 	TargetUUID string          `json:"targetUuid"` // 目标用户UUID
 	TargetInfo *SimpleUserInfo `json:"targetInfo"` // 目标用户信息
+	Reason     string          `json:"reason"`     // 申请理由
+	Source     string          `json:"source"`     // 来源
 	Status     int32           `json:"status"`     // 状态
+	IsRead     bool            `json:"isRead"`     // 是否已读
 	CreatedAt  int64           `json:"createdAt"`  // 申请时间（毫秒时间戳）
 }
 
@@ -426,9 +429,12 @@ func ConvertSentApplyItemFromProto(pb *userpb.SentApplyItem) *SentApplyItem {
 	}
 	return &SentApplyItem{
 		ApplyID:    pb.ApplyId,
-		TargetUUID:  pb.TargetUuid,
+		TargetUUID: pb.TargetUuid,
 		TargetInfo: ConvertSimpleUserInfoFromProto(pb.TargetInfo),
+		Reason:     pb.Reason,
+		Source:     pb.Source,
 		Status:     pb.Status,
+		IsRead:     pb.IsRead,
 		CreatedAt:  pb.CreatedAt,
 	}
 }

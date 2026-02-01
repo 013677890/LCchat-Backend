@@ -17,6 +17,7 @@ type ApplyRequest struct {
 	Status         int8           `gorm:"column:status;not null;default:0;comment:0待处理 1通过 2拒绝 3过期"`
 	IsRead         bool           `gorm:"column:is_read;not null;default:false;comment:申请是否已读"`
 	Reason         string         `gorm:"column:reason;type:varchar(255);comment:申请附言"`
+	Source         string         `gorm:"column:source;type:varchar(32);comment:申请来源"`
 	HandleUserUuid string         `gorm:"column:handle_user_uuid;type:char(20);comment:处理人uuid(好友为目标用户;群为管理员/群主)"`
 	HandleRemark   string         `gorm:"column:handle_remark;type:varchar(255);comment:处理备注"`
 	ExpiredAt      *time.Time     `gorm:"column:expired_at;comment:过期时间"`
