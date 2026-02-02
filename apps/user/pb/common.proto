@@ -25,11 +25,13 @@ message UserInfo {
 	int32 status = 9;
 }
 
-// SimpleUserInfo 简化用户信息（用于批量查询、搜索结果等）
+// SimpleUserInfo 简化用户信息（用于批量查询、好友列表拼装等）
 message SimpleUserInfo {
 	string uuid = 1;
 	string nickname = 2;
 	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
 }
 
 // ==================== 设备信息 ====================
@@ -79,11 +81,11 @@ message OnlineStatusItem {
 
 // ==================== 好友相关 ====================
 
-// SimpleUserItem 简化用户信息（搜索结果）
+// SimpleUserItem 简化用户信息（搜索结果，不包含 email）
 message SimpleUserItem {
 	string uuid = 1;
 	string nickname = 2;
-	string email = 3;
+	reserved 3; // email 已移除
 	string avatar = 4;
 	string signature = 5;
 	bool is_friend = 6;

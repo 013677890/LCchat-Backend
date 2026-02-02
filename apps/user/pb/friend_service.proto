@@ -11,12 +11,9 @@ import "validate/validate.proto";
 
 // ==================== 好友服务接口 ====================
 // 服务名：FriendService
-// 职责：搜索用户、好友申请、好友列表、备注标签
+// 职责：好友申请、好友列表、备注标签
 
 service FriendService {
-	// SearchUser 搜索用户
-	rpc SearchUser(SearchUserRequest) returns (SearchUserResponse);
-	
 	// SendFriendApply 发送好友申请
 	rpc SendFriendApply(SendFriendApplyRequest) returns (SendFriendApplyResponse);
 	
@@ -58,21 +55,6 @@ service FriendService {
 	
 	// GetRelationStatus 获取关系状态
 	rpc GetRelationStatus(GetRelationStatusRequest) returns (GetRelationStatusResponse);
-}
-
-// ==================== 搜索用户 ====================
-
-// SearchUserRequest 搜索用户请求
-message SearchUserRequest {
-	string keyword = 1 [(validate.rules).string = {min_len: 1}];
-	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
-	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
-}
-
-// SearchUserResponse 搜索用户响应
-message SearchUserResponse {
-	repeated SimpleUserItem items = 1;
-	PaginationInfo pagination = 2;
 }
 
 // ==================== 好友申请 ====================

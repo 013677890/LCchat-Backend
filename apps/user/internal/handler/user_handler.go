@@ -14,7 +14,7 @@ type UserHandler struct {
 }
 
 // NewUserHandler 创建用户信息Handler实例
-func NewUserHandler(authService service.IAuthService, userService service.IUserService, friendService service.IFriendService, deviceService service.IDeviceService) *UserHandler {
+func NewUserHandler(userService service.IUserService) *UserHandler {
 	return &UserHandler{
 		userService: userService,
 	}

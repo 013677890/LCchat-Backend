@@ -650,7 +650,7 @@ POST /api/v1/auth/user/password
 #### 6.4.1 搜索用户
 
 ```
-GET /api/v1/auth/users/search
+GET /api/v1/auth/user/search
 ```
 
 #### 6.4.2 发送好友申请

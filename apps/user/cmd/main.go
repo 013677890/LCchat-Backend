@@ -166,7 +166,7 @@ func main() {
 
 	// 7. 组装依赖 - Handler 层
 	authHandler := handler.NewAuthHandler(authService)
-	userHandler := handler.NewUserHandler(authService, userService, friendService, deviceService)
+	userHandler := handler.NewUserHandler(userService)
 	friendHandler := handler.NewFriendHandler(friendService)
 	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
 	deviceHandler := handler.NewDeviceHandler(deviceService)
