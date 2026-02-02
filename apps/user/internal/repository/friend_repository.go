@@ -152,7 +152,25 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 
 // SetFriendRemark 设置好友备注
 func (r *friendRepositoryImpl) SetFriendRemark(ctx context.Context, userUUID, friendUUID, remark string) error {
-	return nil // TODO: 设置好友备注
+	now := time.Now()
+	result := r.db.WithContext(ctx).
+		Model(&model.UserRelation{}).
+		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
+		Updates(map[string]interface{}{
+			"remark":     remark,
+			"updated_at": now,
+		})
+
+	if result.Error != nil {
+		return WrapDBError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+
+	r.updateFriendRemarkCacheAsync(ctx, userUUID, friendUUID, remark, now.UnixMilli())
+
+	return nil
 }
 
 // SetFriendTag 设置好友标签
@@ -495,5 +513,111 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 			}
 			LogRedisError(runCtx, err)
 		}
+	}, 0)
+}
+
+// updateFriendMetaCacheAsync 异步更新好友元数据缓存（单向）
+func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, userUUID string, relation *model.UserRelation) {
+	if relation == nil || relation.PeerUuid == "" {
+		return
+	}
+	cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		metaJSON := buildFriendMetaJSON(
+			relation.Remark,
+			relation.GroupTag,
+			relation.Source,
+			relation.UpdatedAt.UnixMilli(),
+		)
+		expireSeconds := int(getRandomExpireTime(24 * time.Hour).Seconds())
+		luaScript := redis.NewScript(luaUpsertFriendMetaIfExists)
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			relation.PeerUuid,
+			metaJSON,
+			expireSeconds,
+		).Result()
+		if err != nil && err != redis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, 0)
+}
+
+// updateFriendRemarkCacheAsync 异步更新好友备注缓存（单向）
+// 若缓存存在但字段缺失，则回源 MySQL 补全后写入
+func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context, userUUID, friendUUID, remark string, updatedAt int64) {
+	if friendUUID == "" {
+		return
+	}
+
+	cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(runCtx, cacheKey)
+		metaCmd := pipe.HGet(runCtx, cacheKey, friendUUID)
+		_, err := pipe.Exec(runCtx)
+
+		if err != nil && err != redis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+			return
+		}
+
+		if existsCmd.Val() == 0 {
+			return
+		}
+
+		if metaCmd.Err() == nil {
+			meta, err := parseFriendMetaJSON(metaCmd.Val())
+			if err != nil {
+				return
+			}
+			meta.Remark = remark
+			meta.UpdatedAt = updatedAt
+			metaJSON := buildFriendMetaJSON(meta.Remark, meta.GroupTag, meta.Source, meta.UpdatedAt)
+			expireSeconds := int(getRandomExpireTime(24 * time.Hour).Seconds())
+			luaScript := redis.NewScript(luaUpsertFriendMetaIfExists)
+			_, err = luaScript.Run(runCtx, r.redisClient,
+				[]string{cacheKey},
+				friendUUID,
+				metaJSON,
+				expireSeconds,
+			).Result()
+			if err != nil && err != redis.Nil {
+				if isRedisWrongType(err) {
+					_ = r.redisClient.Del(runCtx, cacheKey).Err()
+					return
+				}
+				LogRedisError(runCtx, err)
+			}
+			return
+		}
+
+		if metaCmd.Err() != redis.Nil {
+			if isRedisWrongType(metaCmd.Err()) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+			} else {
+				LogRedisError(runCtx, metaCmd.Err())
+			}
+			return
+		}
+
+		// 缓存存在但字段缺失，回源补全
+		var relation model.UserRelation
+		if err := r.db.WithContext(runCtx).
+			Select("peer_uuid", "remark", "group_tag", "source", "updated_at").
+			Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
+			First(&relation).Error; err != nil {
+			return
+		}
+
+		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
 	}, 0)
 }
