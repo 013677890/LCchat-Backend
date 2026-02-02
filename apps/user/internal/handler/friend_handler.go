@@ -85,6 +85,11 @@ func (h *FriendHandler) CheckIsFriend(ctx context.Context, req *pb.CheckIsFriend
 	return h.friendService.CheckIsFriend(ctx, req)
 }
 
+// BatchCheckIsFriend 批量判断是否好友
+func (h *FriendHandler) BatchCheckIsFriend(ctx context.Context, req *pb.BatchCheckIsFriendRequest) (*pb.BatchCheckIsFriendResponse, error) {
+	return h.friendService.BatchCheckIsFriend(ctx, req)
+}
+
 // GetRelationStatus 获取关系状态
 func (h *FriendHandler) GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error) {
 	return h.friendService.GetRelationStatus(ctx, req)

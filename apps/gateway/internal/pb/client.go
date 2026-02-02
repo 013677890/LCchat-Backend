@@ -278,6 +278,13 @@ func (c *userServiceClientImpl) CheckIsFriend(ctx context.Context, req *userpb.C
 	})
 }
 
+// BatchCheckIsFriend 批量判断是否好友
+func (c *userServiceClientImpl) BatchCheckIsFriend(ctx context.Context, req *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "BatchCheckIsFriend", func() (*userpb.BatchCheckIsFriendResponse, error) {
+		return c.friendClient.BatchCheckIsFriend(ctx, req)
+	})
+}
+
 // GetRelationStatus 获取关系状态
 func (c *userServiceClientImpl) GetRelationStatus(ctx context.Context, req *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error) {
 	return ExecuteWithBreaker(c.breaker, "GetRelationStatus", func() (*userpb.GetRelationStatusResponse, error) {

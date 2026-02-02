@@ -121,6 +121,9 @@ type IFriendService interface {
 	// CheckIsFriend 判断是否好友
 	CheckIsFriend(ctx context.Context, req *pb.CheckIsFriendRequest) (*pb.CheckIsFriendResponse, error)
 
+	// BatchCheckIsFriend 批量判断是否好友
+	BatchCheckIsFriend(ctx context.Context, req *pb.BatchCheckIsFriendRequest) (*pb.BatchCheckIsFriendResponse, error)
+
 	// GetRelationStatus 获取关系状态
 	GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error)
 }

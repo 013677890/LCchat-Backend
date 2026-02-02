@@ -189,25 +189,47 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 		return resp, nil
 	}
 
-	// 3. 尝试补充好友关系（逐条判断，失败则降级不填）
+	// 3. 尝试补充好友关系（批量判断，失败则降级不填）
 	currentUserUUID, ok := ctx.Value("user_uuid").(string)
 	if ok && currentUserUUID != "" {
+		peerUUIDs := make([]string, 0, len(resp.Items))
+		seen := make(map[string]struct{}, len(resp.Items))
 		for _, item := range resp.Items {
 			if item == nil || item.UUID == "" {
 				continue
 			}
-			friendResp, err := s.userClient.CheckIsFriend(ctx, &userpb.CheckIsFriendRequest{
-				UserUuid: currentUserUUID,
-				PeerUuid: item.UUID,
-			})
-			if err != nil {
-				logger.Warn(ctx, "判断是否好友失败，降级返回",
-					logger.String("peer_uuid", item.UUID),
-					logger.ErrorField("error", err),
-				)
+			if _, exists := seen[item.UUID]; exists {
 				continue
 			}
-			item.IsFriend = friendResp.IsFriend
+			seen[item.UUID] = struct{}{}
+			peerUUIDs = append(peerUUIDs, item.UUID)
+		}
+
+		if len(peerUUIDs) > 0 {
+			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &userpb.BatchCheckIsFriendRequest{
+				UserUuid:  currentUserUUID,
+				PeerUuids: peerUUIDs,
+			})
+			if err != nil {
+				logger.Warn(ctx, "批量判断是否好友失败，降级返回",
+					logger.Int("count", len(peerUUIDs)),
+					logger.ErrorField("error", err),
+				)
+			} else if batchResp != nil {
+				result := make(map[string]bool, len(batchResp.Items))
+				for _, item := range batchResp.Items {
+					if item == nil || item.PeerUuid == "" {
+						continue
+					}
+					result[item.PeerUuid] = item.IsFriend
+				}
+				for _, item := range resp.Items {
+					if item == nil || item.UUID == "" {
+						continue
+					}
+					item.IsFriend = result[item.UUID]
+				}
+			}
 		}
 	}
 

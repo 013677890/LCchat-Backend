@@ -52,6 +52,9 @@ service FriendService {
 	
 	// CheckIsFriend 判断是否好友
 	rpc CheckIsFriend(CheckIsFriendRequest) returns (CheckIsFriendResponse);
+
+	// BatchCheckIsFriend 批量判断是否好友
+	rpc BatchCheckIsFriend(BatchCheckIsFriendRequest) returns (BatchCheckIsFriendResponse);
 	
 	// GetRelationStatus 获取关系状态
 	rpc GetRelationStatus(GetRelationStatusRequest) returns (GetRelationStatusResponse);
@@ -249,6 +252,23 @@ message CheckIsFriendRequest {
 // CheckIsFriendResponse 判断是否好友响应
 message CheckIsFriendResponse {
 	bool is_friend = 1;
+}
+
+// BatchCheckIsFriendRequest 批量判断是否好友请求
+message BatchCheckIsFriendRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	repeated string peer_uuids = 2 [(validate.rules).repeated = {min_items: 1, max_items: 100}];
+}
+
+// FriendCheckItem 好友关系判断项
+message FriendCheckItem {
+	string peer_uuid = 1;
+	bool is_friend = 2;
+}
+
+// BatchCheckIsFriendResponse 批量判断是否好友响应
+message BatchCheckIsFriendResponse {
+	repeated FriendCheckItem items = 1;
 }
 
 // GetRelationStatusRequest 获取关系状态请求

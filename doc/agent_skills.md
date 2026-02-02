@@ -8,17 +8,18 @@ in this project. It is intended for AI agents and new contributors.
 - gRPC for service-to-service calls
 - Gin for HTTP gateway
 - GORM for database access
-- Redis for cache/token/verification code
+- Redis for cache/token/verification code/rate limit
 - Protobuf + validate rules for request schema
 
 ### 2. Code Structure & Modules
 - `apps/gateway/`: HTTP gateway, DTOs, routing, gRPC client calls
 - `apps/user/`: user service, business logic, repositories, protobufs
-  - ⚠️ **Architecture Note**: Currently contains two logical domains:
+  - **Architecture Note**: Currently contains two logical domains:
     1. **Core User Domain**: Authentication, Device Sessions, User Profile
     2. **Social Domain**: Friends, Blacklist
-  - **Future Decoupling**: These should be kept loosely coupled for future split into separate microservices
-  - When developing new features, maintain clear boundaries between these domains
+  - **Future Decoupling**: Keep these domains loosely coupled for eventual split
+  - **Boundary Rule**: Social domain should not query Core domain tables directly
+    (use UUIDs only; aggregate user info via gateway + user-service)
 - `apps/connect/`: WebSocket connection service (future)
 - `apps/msg/`: message service (future)
 - `pkg/`: shared utilities (redis, logger, util, minio)
@@ -31,30 +32,6 @@ in this project. It is intended for AI agents and new contributors.
 - `doc/07-错误码.md`: full error code definitions
 
 ### 3. Conventions & Patterns
-
-#### 3.16 Async 协程池
-- 协程池实现：`pkg/async`，基于 ants（Worker Pool）。
-- 配置：`config/async.go`，默认 `DefaultAsyncConfig()`。
-- 初始化：每个独立进程在 main 中调用 `async.Init`，并 `defer async.Release()`。
-- 上下文透传：业务层通过 `async.SetContextPropagator` 注入需要透传的字段，避免在 async 包内硬编码。
-- **Submit vs RunSafe 区别**：
-  - `async.Submit`: 简单任务投递，无 Context 传播，无 panic 恢复
-  - `async.RunSafe`: 带 Context 传播、独立超时控制、panic recover（**推荐用于 gRPC 调用**）
-- **何时必须使用 RunSafe**：
-  - 并发调用 gRPC 服务
-  - 需要 trace_id/user_uuid 等上下文信息的异步任务
-  - 父请求可能提前取消的场景（避免 context cancelled 错误）
-
-#### 3.1 Error Handling
-- Business errors are encoded as `grpc/status` with numeric error codes in
-  the message, then extracted in gateway via `utils.ExtractErrorCode`.
-- Use `consts.IsNonServerError(code)` to decide if it is a user-facing error.
-- Log internal errors with context and return `CodeInternalError`.
-
-#### 3.2 DTO ↔ Protobuf Conversion
-- Gateway request DTOs live in `apps/gateway/internal/dto`.
-- Always convert DTOs to Protobuf using `ConvertToProto...` functions.
-- Always convert Protobuf responses to DTO using `Convert...FromProto`.
 
 #### 3.1 Error Handling
 - Business errors are encoded as `grpc/status` with numeric error codes in
@@ -74,14 +51,13 @@ in this project. It is intended for AI agents and new contributors.
 
 #### 3.4 Logging
 - Use `logger.Info/Warn/Error` and include key fields (email, device, ip).
-- **禁止记录的敏感字段**：
+- **禁止记录的敏感字段**:
   - ❌ `password` / `new_password` / `old_password`
   - ❌ `verify_code` / `verifyCode`
   - ❌ 完整的 `access_token` / `refresh_token`
-- **允许脱敏后记录**：
+- **允许脱敏后记录**:
   - ✅ `email` → `utils.MaskEmail(email)` (显示前3位和域名)
   - ✅ `telephone` → `utils.MaskTelephone(phone)` (显示前3后4)
-
 
 #### 3.5 Redis Usage
 - Verification codes stored in Redis with TTL (e.g., 2 minutes).
@@ -92,6 +68,8 @@ in this project. It is intended for AI agents and new contributors.
 
 #### 3.6 Routing Style
 - Public routes grouped under `/api/v1/public/user/...`.
+- Authenticated routes grouped under `/api/v1/auth/...`.
+- SearchUser belongs to user domain: `/api/v1/auth/user/search`.
 - Add new endpoints in:
   - `apps/gateway/internal/router/v1/auth_handle.go`
   - `apps/gateway/internal/router/router.go`
@@ -148,13 +126,13 @@ in this project. It is intended for AI agents and new contributors.
 
 - `user:apply:pending:{target_uuid}` / ZSet / 24h±随机抖动; 空值5m / `apply_repository` / 待处理好友申请 (member=applicant UUID, score=created_at unix, 空值占位 `__EMPTY__`)
 
-#### 3.17 Pagination & Versioning
+#### 3.13 Pagination & Versioning
 - 全量初始化接口的 `version` 用 **当前服务器时间**，不要用 `MAX(updated_at)`（避免删除/历史数据导致版本回退）。
 - 只在 **第一页** 计算 `total` 和 `version`，后续页不重复统计，降低 DB 压力。
 - 列表排序必须稳定：推荐 `created_at DESC, id DESC`。
 - Offset 分页存在并发抖动，客户端需按 `uuid` 去重（服务端保证稳定排序即可）。
 
-#### 3.13 Rate Limiting
+#### 3.14 Rate Limiting
 - **IP Level Rate Limiting**: Redis-based token bucket algorithm for IP addresses.
   - Global IP limiting via `IPRateLimitMiddleware`
   - Configurable per-route via `IPRateLimitMiddlewareWithConfig`
@@ -168,7 +146,7 @@ in this project. It is intended for AI agents and new contributors.
   - User limiting: `gateway:rate:limit:user:{user_uuid}`
 - **Fail-Open Strategy**: When Redis is unavailable, requests are allowed to pass through.
 
-#### 3.14 File Upload & Object Storage (MinIO)
+#### 3.15 File Upload & Object Storage (MinIO)
 - **MinIO Integration**: S3-compatible object storage for images, avatars, and files.
   - Config in `config/minio.go` with connection, bucket, and upload settings
   - Client wrapper in `pkg/minio/minio.go` with upload/download/delete operations
@@ -189,9 +167,29 @@ in this project. It is intended for AI agents and new contributors.
 - **Access Control**: Support for public read or presigned URLs for private files
 - See `doc/minio_usage.md` for detailed examples
 
-#### 3.15 Observability
+#### 3.16 Observability
 - `trace_id` generated by middleware, returned in response.
 - `business_code` is stored in context for metrics middleware.
+
+#### 3.17 Async 协程池
+- 协程池实现：`pkg/async`，基于 ants（Worker Pool）。
+- 配置：`config/async.go`，默认 `DefaultAsyncConfig()`。
+- 初始化：每个独立进程在 main 中调用 `async.Init`，并 `defer async.Release()`。
+- 上下文透传：业务层通过 `async.SetContextPropagator` 注入需要透传的字段，避免在 async 包内硬编码。
+- **Submit vs RunSafe 区别**:
+  - `async.Submit`: 简单任务投递，无 Context 传播，无 panic 恢复
+  - `async.RunSafe`: 带 Context 传播、独立超时控制、panic recover（**推荐用于 gRPC 调用**）
+- **何时必须使用 RunSafe**:
+  - 并发调用 gRPC 服务
+  - 需要 trace_id/user_uuid 等上下文信息的异步任务
+  - 父请求可能提前取消的场景（避免 context cancelled 错误）
+
+#### 3.18 Cross-domain Aggregation (Gateway)
+- 社交域只返回关系数据（UUID、备注、标签等），避免跨库依赖。
+- 网关负责聚合用户信息：
+  - 批量调用 user-service `BatchGetProfile` 补全昵称/头像/性别/签名
+  - 搜索用户后通过 friend-service `BatchCheckIsFriend` 批量补充 isFriend
+- 优先使用批量接口，避免 N+1 gRPC 调用。
 
 ### 4. Required Skills for Future Agents
 
@@ -265,15 +263,16 @@ The `apps/user/` service currently contains two major domains that should remain
 
 #### 8.2 Decoupling Best Practices
 When developing new features:
-1. **Avoid Cross-Domain Dependencies**: Core User Domain should NOT import Social Domain code
-2. **Use Clear Interfaces**: Define service interfaces that can be easily extracted
-3. **Separate Data Models**: Keep friend/blacklist models independent from user models
-4. **Independent Proto Files**: Use separate .proto files for each domain
-5. **Database Considerations**: Design tables to minimize foreign key dependencies across domains
+1. **Avoid Cross-Domain Dependencies**: Core domain should NOT import Social domain code, and vice versa.
+2. **Use Clear Interfaces**: Define service interfaces that can be easily extracted.
+3. **Separate Data Models**: Keep friend/blacklist models independent from user models.
+4. **Independent Proto Files**: Use separate .proto files for each domain.
+5. **Database Considerations**: Design tables to minimize foreign key dependencies across domains.
+6. **Aggregation in Gateway**: If social data needs user info, aggregate via gateway + user-service batch APIs.
 
 #### 8.3 Future Split Considerations
 When these domains are split into separate microservices:
 - **auth-service**: Authentication, JWT, Device Sessions, User Profile
 - **social-service**: Friends, Blacklist, (future: Groups, Contacts)
 - Communication via gRPC between services
-- Gateway will route to appropriate service based on endpoint
+- Gateway routes to the appropriate service by endpoint

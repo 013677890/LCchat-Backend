@@ -732,6 +732,40 @@ func (s *friendServiceImpl) CheckIsFriend(ctx context.Context, req *pb.CheckIsFr
 	}, nil
 }
 
+// BatchCheckIsFriend 批量判断是否好友
+func (s *friendServiceImpl) BatchCheckIsFriend(ctx context.Context, req *pb.BatchCheckIsFriendRequest) (*pb.BatchCheckIsFriendResponse, error) {
+	if req == nil || len(req.PeerUuids) == 0 {
+		return &pb.BatchCheckIsFriendResponse{
+			Items: []*pb.FriendCheckItem{},
+		}, nil
+	}
+
+	result, err := s.friendRepo.BatchCheckIsFriend(ctx, req.UserUuid, req.PeerUuids)
+	if err != nil {
+		logger.Error(ctx, "批量判断是否好友失败",
+			logger.String("user_uuid", req.UserUuid),
+			logger.Int("count", len(req.PeerUuids)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	items := make([]*pb.FriendCheckItem, 0, len(req.PeerUuids))
+	for _, peerUUID := range req.PeerUuids {
+		if peerUUID == "" {
+			continue
+		}
+		items = append(items, &pb.FriendCheckItem{
+			PeerUuid: peerUUID,
+			IsFriend: result[peerUUID],
+		})
+	}
+
+	return &pb.BatchCheckIsFriendResponse{
+		Items: items,
+	}, nil
+}
+
 // GetRelationStatus 获取关系状态
 func (s *friendServiceImpl) GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "获取关系状态功能暂未实现")
