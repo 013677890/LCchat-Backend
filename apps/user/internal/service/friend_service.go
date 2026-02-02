@@ -859,5 +859,49 @@ func (s *friendServiceImpl) BatchCheckIsFriend(ctx context.Context, req *pb.Batc
 
 // GetRelationStatus 获取关系状态
 func (s *friendServiceImpl) GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取关系状态功能暂未实现")
+	if req == nil || req.UserUuid == "" || req.PeerUuid == "" {
+		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	relation, err := s.friendRepo.GetRelationStatus(ctx, req.UserUuid, req.PeerUuid)
+	if err != nil {
+		logger.Error(ctx, "获取关系状态失败",
+			logger.String("user_uuid", req.UserUuid),
+			logger.String("peer_uuid", req.PeerUuid),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	resp := &pb.GetRelationStatusResponse{
+		Relation:    "none",
+		IsFriend:    false,
+		IsBlacklist: false,
+		Remark:      "",
+		GroupTag:    "",
+	}
+
+	if relation == nil {
+		return resp, nil
+	}
+
+	if relation.DeletedAt.Valid || relation.Status == 2 {
+		resp.Relation = "deleted"
+		return resp, nil
+	}
+
+	switch relation.Status {
+	case 0:
+		resp.Relation = "friend"
+		resp.IsFriend = true
+		resp.Remark = relation.Remark
+		resp.GroupTag = relation.GroupTag
+	case 1:
+		resp.Relation = "blacklist"
+		resp.IsBlacklist = true
+	default:
+		resp.Relation = "none"
+	}
+
+	return resp, nil
 }

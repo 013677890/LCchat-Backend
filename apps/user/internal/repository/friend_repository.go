@@ -4,6 +4,7 @@ import (
 	"ChatServer/model"
 	"ChatServer/pkg/async"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -324,6 +325,99 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 	return false, false
 }
 
+// getFriendMetaCache 获取好友元数据缓存
+// 返回值: cacheHit(该用户缓存是否存在), meta(好友元数据), isFriend(是否包含对方)
+func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID, friendUUID string) (bool, *friendMeta, bool) {
+	if userUUID == "" || friendUUID == "" {
+		return false, nil, false
+	}
+
+	cacheKey := fmt.Sprintf("user:relation:friend:%s", userUUID)
+	pipe := r.redisClient.Pipeline()
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
+
+	// 概率续期优化：1% 的概率在读取时顺便续期
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+		} else {
+			LogRedisError(ctx, err)
+		}
+		return false, nil, false
+	}
+
+	if existsCmd.Val() == 0 {
+		return false, nil, false
+	}
+
+	if metaCmd.Err() == nil {
+		meta, err := parseFriendMetaJSON(metaCmd.Val())
+		if err != nil {
+			return true, nil, true
+		}
+		return true, meta, true
+	}
+	if metaCmd.Err() == redis.Nil {
+		return true, nil, false
+	}
+	if isRedisWrongType(metaCmd.Err()) {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return false, nil, false
+	}
+
+	LogRedisError(ctx, metaCmd.Err())
+	return false, nil, false
+}
+
+// checkBlacklistCache 检查黑名单缓存命中情况
+// 返回值: cacheHit(该用户缓存是否存在), isBlocked(是否包含对方)
+func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID, peerUUID string) (bool, bool) {
+	if userUUID == "" || peerUUID == "" {
+		return false, false
+	}
+
+	cacheKey := fmt.Sprintf("user:relation:blacklist:%s", userUUID)
+	pipe := r.redisClient.Pipeline()
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	memberCmd := pipe.SIsMember(ctx, cacheKey, peerUUID)
+
+	// 概率续期优化：1% 的概率在读取时顺便续期
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(24*time.Hour))
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+		} else {
+			LogRedisError(ctx, err)
+		}
+		return false, false
+	}
+
+	if existsCmd.Val() == 0 {
+		return false, false
+	}
+
+	if memberCmd.Err() == nil {
+		return true, memberCmd.Val()
+	}
+	if isRedisWrongType(memberCmd.Err()) {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return false, false
+	}
+
+	LogRedisError(ctx, memberCmd.Err())
+	return false, false
+}
+
 // CheckIsFriendRelation 判断两用户是否存在好友关系（以 userUUID 为准，先查 Redis，未命中再查 DB）
 func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUUID, peerUUID string) (bool, error) {
 	cacheHit, isFriend := r.checkFriendCache(ctx, userUUID, peerUUID)
@@ -347,7 +441,47 @@ func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUU
 
 // GetRelationStatus 获取关系状态
 func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error) {
-	return nil, nil // TODO: 获取关系状态
+	friendHit, meta, isFriend := r.getFriendMetaCache(ctx, userUUID, peerUUID)
+	if friendHit && isFriend {
+		relation := &model.UserRelation{
+			UserUuid: userUUID,
+			PeerUuid: peerUUID,
+			Status:   0,
+		}
+		if meta != nil {
+			relation.Remark = meta.Remark
+			relation.GroupTag = meta.GroupTag
+			relation.Source = meta.Source
+		}
+		return relation, nil
+	}
+
+	blacklistHit, isBlacklist := r.checkBlacklistCache(ctx, userUUID, peerUUID)
+	if blacklistHit && isBlacklist {
+		return &model.UserRelation{
+			UserUuid: userUUID,
+			PeerUuid: peerUUID,
+			Status:   1,
+		}, nil
+	}
+
+	if friendHit && !isFriend && blacklistHit && !isBlacklist {
+		return nil, nil
+	}
+
+	var relation model.UserRelation
+	err := r.db.WithContext(ctx).
+		Unscoped().
+		Where("user_uuid = ? AND peer_uuid = ?", userUUID, peerUUID).
+		First(&relation).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, WrapDBError(err)
+	}
+
+	return &relation, nil
 }
 
 // SyncFriendList 增量同步好友列表
