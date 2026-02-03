@@ -3,7 +3,11 @@ package service
 import (
 	"ChatServer/apps/user/internal/repository"
 	pb "ChatServer/apps/user/pb"
+	"ChatServer/consts"
+	"ChatServer/pkg/logger"
+	"ChatServer/pkg/util"
 	"context"
+	"strconv"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,7 +27,44 @@ func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
 
 // GetDeviceList 获取设备列表
 func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDeviceListRequest) (*pb.GetDeviceListResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取设备列表功能暂未实现")
+	userUUID := util.GetUserUUIDFromContext(ctx)
+	if userUUID == "" {
+		logger.Warn(ctx, "获取设备列表失败：user_uuid 为空")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	deviceID := util.GetDeviceIDFromContext(ctx)
+
+	sessions, err := s.deviceRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		logger.Error(ctx, "获取设备列表失败",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	devices := make([]*pb.DeviceItem, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		lastSeenAt := util.TimeToUnixMilli(session.UpdatedAt)
+		if lastSeenAt == 0 {
+			lastSeenAt = util.TimeToUnixMilli(session.CreatedAt)
+		}
+		devices = append(devices, &pb.DeviceItem{
+			DeviceId:        session.DeviceId,
+			DeviceName:      session.DeviceName,
+			Platform:        session.Platform,
+			AppVersion:      session.AppVersion,
+			IsCurrentDevice: deviceID != "" && session.DeviceId == deviceID,
+			Status:          int32(session.Status),
+			LastSeenAt:      lastSeenAt,
+		})
+	}
+
+	return &pb.GetDeviceListResponse{Devices: devices}, nil
 }
 
 // KickDevice 踢出设备

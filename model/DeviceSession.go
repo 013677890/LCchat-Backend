@@ -19,19 +19,13 @@ type DeviceSession struct {
 	DeviceName string `gorm:"column:device_name;type:varchar(64);not null;default:'Unknown Device';comment:设备名称(如 iPhone 13 Pro)"`
 	Platform   string `gorm:"column:platform;type:varchar(32);not null;comment:平台(iOS/Android/Web/Win/Mac)"`
 	
-	// 鉴权数据
-	// 【修正】JWT通常很长，255不够用，建议 1024 或 text
-	Token        string `gorm:"column:token;type:varchar(2048);comment:Access Token"`
-	RefreshToken string `gorm:"column:refresh_token;type:varchar(2048);comment:Refresh Token"`
-	
 	// 环境信息 (风控用)
 	AppVersion string `gorm:"column:app_version;type:varchar(32);comment:APP版本"`
 	IP         string `gorm:"column:ip;type:varchar(64);comment:登录IP"`
-	UserAgent  string `gorm:"column:user_agent;type:varchar(255);comment:User Agent"`
+	UserAgent  string `gorm:"column:user_agent;type:varchar(128);comment:User Agent(精简)"` // 仅保留必要信息
 	
 	// 时间与状态
 	ExpireAt   *time.Time `gorm:"column:expire_at;index;comment:过期时间(用于清理过期会话)"`
-	LastSeenAt *time.Time `gorm:"column:last_seen_at;comment:最后活跃时间(注意减少写入频率)"`
 	
 	// 0在线 1下线(被踢) 2注销
 	Status     int8       `gorm:"column:status;not null;default:0;comment:状态"`

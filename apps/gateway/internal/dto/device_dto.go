@@ -2,6 +2,7 @@ package dto
 
 import (
 	userpb "ChatServer/apps/user/pb"
+	"ChatServer/pkg/util"
 )
 
 // ==================== 设备服务相关 DTO ====================
@@ -22,7 +23,7 @@ type DeviceItem struct {
 	AppVersion      string `json:"appVersion"`      // 应用版本
 	IsCurrentDevice bool   `json:"isCurrentDevice"` // 是否当前设备
 	Status          int32  `json:"status"`          // 状态(0:在线 1:下线 2:被踢)
-	LastSeenAt      int64  `json:"lastSeenAt"`      // 最后活跃时间（毫秒时间戳）
+	LastSeenAt      string `json:"lastSeenAt"`      // 最后活跃时间（RFC3339）
 }
 
 // KickDeviceRequest 踢出设备请求 DTO
@@ -47,7 +48,7 @@ type GetOnlineStatusResponse struct {
 type OnlineStatus struct {
 	UserUUID        string   `json:"userUuid"`        // 用户UUID
 	IsOnline        bool     `json:"isOnline"`        // 是否在线
-	LastSeenAt      int64    `json:"lastSeenAt"`      // 最后活跃时间（毫秒时间戳）
+	LastSeenAt      string   `json:"lastSeenAt"`      // 最后活跃时间（RFC3339）
 	OnlinePlatforms []string `json:"onlinePlatforms"` // 在线的平台列表
 }
 
@@ -65,7 +66,7 @@ type BatchGetOnlineStatusResponse struct {
 type OnlineStatusItem struct {
 	UserUUID   string `json:"userUuid"`   // 用户UUID
 	IsOnline   bool   `json:"isOnline"`   // 是否在线
-	LastSeenAt int64  `json:"lastSeenAt"` // 最后活跃时间（毫秒时间戳）
+	LastSeenAt string `json:"lastSeenAt"` // 最后活跃时间（RFC3339）
 }
 
 // ==================== 设备服务 DTO 转换函数 ====================
@@ -112,7 +113,7 @@ func ConvertDeviceItemFromProto(pb *userpb.DeviceItem) *DeviceItem {
 		AppVersion:      pb.AppVersion,
 		IsCurrentDevice: pb.IsCurrentDevice,
 		Status:          pb.Status,
-		LastSeenAt:      pb.LastSeenAt,
+		LastSeenAt:      util.FormatUnixMilliRFC3339(pb.LastSeenAt),
 	}
 }
 
@@ -124,7 +125,7 @@ func ConvertOnlineStatusFromProto(pb *userpb.OnlineStatus) *OnlineStatus {
 	return &OnlineStatus{
 		UserUUID:        pb.UserUuid,
 		IsOnline:        pb.IsOnline,
-		LastSeenAt:      pb.LastSeenAt,
+		LastSeenAt:      util.FormatUnixMilliRFC3339(pb.LastSeenAt),
 		OnlinePlatforms: pb.OnlinePlatforms,
 	}
 }
@@ -137,7 +138,7 @@ func ConvertOnlineStatusItemFromProto(pb *userpb.OnlineStatusItem) *OnlineStatus
 	return &OnlineStatusItem{
 		UserUUID:   pb.UserUuid,
 		IsOnline:   pb.IsOnline,
-		LastSeenAt: pb.LastSeenAt,
+		LastSeenAt: util.FormatUnixMilliRFC3339(pb.LastSeenAt),
 	}
 }
 

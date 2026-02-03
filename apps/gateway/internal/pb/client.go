@@ -368,6 +368,7 @@ func CreateConnection(addr string, serviceName string, breaker *gobreaker.Circui
 		),
 		// 注入熔断拦截器
 		grpc.WithChainUnaryInterceptor(
+			middleware.GRPCMetadataInterceptor(), // 透传 trace/user/device/ip
 			middleware.GRPCLoggerInterceptor(),// 记录请求日志
 			middleware.CircuitBreakerInterceptor(breaker),// 熔断器拦截器
 		),

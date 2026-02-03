@@ -164,6 +164,9 @@ func main() {
 	blacklistService := service.NewBlacklistService(userClient)
 	logger.Info(ctx, "黑名单服务初始化完成")
 
+	deviceService := service.NewDeviceService(userClient)
+	logger.Info(ctx, "设备服务初始化完成")
+
 	// 7. 初始化 Handler 层（依赖注入）
 	authHandler := v1.NewAuthHandler(authService)
 	logger.Info(ctx, "认证处理器初始化完成")
@@ -177,10 +180,13 @@ func main() {
 	blacklistHandler := v1.NewBlacklistHandler(blacklistService)
 	logger.Info(ctx, "黑名单处理器初始化完成")
 
+	deviceHandler := v1.NewDeviceHandler(deviceService)
+	logger.Info(ctx, "设备处理器初始化完成")
+
 	// 8. 初始化路由（依赖注入）
 	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
 	gin.SetMode(gin.ReleaseMode)
-	r := router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler)
+	r := router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
 	logger.Info(ctx, "路由初始化完成")
 
 	// 9. 配置服务器

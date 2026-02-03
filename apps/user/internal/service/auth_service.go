@@ -19,6 +19,36 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// buildDeviceUserAgent 生成精简版 UserAgent（保留必要信息）
+func buildDeviceUserAgent(deviceInfo *pb.DeviceInfo) string {
+	if deviceInfo == nil {
+		return ""
+	}
+	platform := deviceInfo.GetPlatform()
+	appVersion := deviceInfo.GetAppVersion()
+	osVersion := deviceInfo.GetOsVersion()
+
+	result := ""
+	if platform != "" {
+		result = platform
+	}
+	if appVersion != "" {
+		if result != "" {
+			result += "/" + appVersion
+		} else {
+			result = appVersion
+		}
+	}
+	if osVersion != "" {
+		if result != "" {
+			result += " (" + osVersion + ")"
+		} else {
+			result = osVersion
+		}
+	}
+	return result
+}
+
 // authServiceImpl 认证服务实现
 type authServiceImpl struct {
 	authRepo   repository.IAuthRepository
@@ -219,7 +249,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 		Platform:   req.DeviceInfo.GetPlatform(),
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
-		UserAgent:  req.DeviceInfo.GetOsVersion(), // 可以根据实际需求调整
+		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
 		Status:     0,                             // 0: 在线
 	}
 
@@ -367,7 +397,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		Platform:   req.DeviceInfo.GetPlatform(),
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
-		UserAgent:  req.DeviceInfo.GetOsVersion(), // 可以根据实际需求调整
+		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
 		Status:     0,                             // 0: 在线
 	}
 

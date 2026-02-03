@@ -123,6 +123,23 @@ type BlacklistService interface {
 	CheckIsBlacklist(ctx context.Context, req *dto.CheckIsBlacklistRequest) (*dto.CheckIsBlacklistResponse, error)
 }
 
+// DeviceService 设备服务接口
+// 职责：
+//   - 调用下游用户服务进行设备相关操作
+type DeviceService interface {
+	// GetDeviceList 获取设备列表
+	GetDeviceList(ctx context.Context) (*dto.GetDeviceListResponse, error)
+
+	// KickDevice 踢出设备
+	KickDevice(ctx context.Context, req *dto.KickDeviceRequest) (*dto.KickDeviceResponse, error)
+
+	// GetOnlineStatus 获取用户在线状态
+	GetOnlineStatus(ctx context.Context, req *dto.GetOnlineStatusRequest) (*dto.GetOnlineStatusResponse, error)
+
+	// BatchGetOnlineStatus 批量获取在线状态
+	BatchGetOnlineStatus(ctx context.Context, req *dto.BatchGetOnlineStatusRequest) (*dto.BatchGetOnlineStatusResponse, error)
+}
+
 // UserService 用户服务接口
 type UserService interface {
 	// GetProfile 获取个人信息

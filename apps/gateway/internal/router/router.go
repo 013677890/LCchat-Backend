@@ -14,7 +14,8 @@ import (
 // userHandler: 用户信息处理器（依赖注入）
 // friendHandler: 好友处理器（依赖注入）
 // blacklistHandler: 黑名单处理器（依赖注入）
-func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler) *gin.Engine {
+// deviceHandler: 设备处理器（依赖注入）
+func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler, deviceHandler *v1.DeviceHandler) *gin.Engine {
 	r := gin.New()
 
 	// 恢复中间件
@@ -95,6 +96,10 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				user.POST("/avatar", userHandler.UploadAvatar)
 				user.GET("/qrcode", userHandler.GetQRCode)
 				user.POST("/batch-profile", userHandler.BatchGetProfile)
+				user.GET("/devices", deviceHandler.GetDeviceList)
+				user.DELETE("/devices/:deviceId", deviceHandler.KickDevice)
+				user.GET("/online-status/:userUuid", deviceHandler.GetOnlineStatus)
+				user.POST("/batch-online-status", deviceHandler.BatchGetOnlineStatus)
 
 				// 敏感操作使用更严格的限流
 				user.POST("/change-password",

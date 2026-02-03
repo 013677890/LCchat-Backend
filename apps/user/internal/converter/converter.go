@@ -3,6 +3,7 @@ package converter
 import (
 	pb "ChatServer/apps/user/pb"
 	"ChatServer/model"
+	"ChatServer/pkg/util"
 	"time"
 )
 
@@ -278,8 +279,9 @@ func ModelToProtoDeviceItem(session *model.DeviceSession, currentDeviceID string
 		IsCurrentDevice: session.DeviceId == currentDeviceID,
 	}
 
-	if session.LastSeenAt != nil {
-		item.LastSeenAt = session.LastSeenAt.Unix() * 1000
+	item.LastSeenAt = util.TimeToUnixMilli(session.UpdatedAt)
+	if item.LastSeenAt == 0 {
+		item.LastSeenAt = util.TimeToUnixMilli(session.CreatedAt)
 	}
 
 	return item

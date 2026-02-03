@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -33,6 +34,20 @@ func (r *deviceRepositoryImpl) refreshTokenKey(userUUID, deviceID string) string
 	return fmt.Sprintf("auth:rt:%s:%s", userUUID, deviceID)
 }
 
+func (r *deviceRepositoryImpl) deviceInfoKey(userUUID string) string {
+	return fmt.Sprintf("user:devices:%s", userUUID)
+}
+
+type deviceCacheItem struct {
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
+	Platform   string `json:"platform"`
+	AppVersion string `json:"appVersion"`
+	UserAgent  string `json:"userAgent,omitempty"`
+	Status     int8   `json:"status"`
+	LoginAt    string `json:"loginAt"` // RFC3339
+}
+
 // md5Hash 计算字符串的 MD5 哈希
 func md5Hash(s string) string {
 	h := md5.New()
@@ -51,7 +66,15 @@ func (r *deviceRepositoryImpl) Create(ctx context.Context, session *model.Device
 
 // GetByUserUUID 获取用户的所有设备会话
 func (r *deviceRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string) ([]*model.DeviceSession, error) {
-	return nil, nil // TODO: 获取用户的所有设备会话
+	var sessions []*model.DeviceSession
+	err := r.db.WithContext(ctx).
+		Where("user_uuid = ?", userUUID).
+		Order("updated_at DESC, id DESC").
+		Find(&sessions).Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+	return sessions, nil
 }
 
 // GetByDeviceID 根据设备ID获取会话
@@ -76,26 +99,52 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 		Exec(`
 			INSERT INTO device_session (
 				user_uuid, device_id, device_name, platform, 
-				app_version, ip, user_agent, last_seen_at, status, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+				app_version, ip, user_agent, status, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				device_name = VALUES(device_name),
 				platform = VALUES(platform),
 				app_version = VALUES(app_version),
 				ip = VALUES(ip),
 				user_agent = VALUES(user_agent),
-				last_seen_at = VALUES(last_seen_at),
 				status = 0,
 				updated_at = VALUES(updated_at)
 		`,
 			session.UserUuid, session.DeviceId, session.DeviceName, session.Platform,
-			session.AppVersion, session.IP, session.UserAgent, now, now, now,
+			session.AppVersion, session.IP, session.UserAgent, now, now,
 		).Error
 
 	if err != nil {
 		return WrapDBError(err)
 	}
+
+	r.storeDeviceInfoCache(ctx, session, now)
 	return nil
+}
+
+func (r *deviceRepositoryImpl) storeDeviceInfoCache(ctx context.Context, session *model.DeviceSession, loginAt time.Time) {
+	cacheKey := r.deviceInfoKey(session.UserUuid)
+	item := deviceCacheItem{
+		DeviceID:   session.DeviceId,
+		DeviceName: session.DeviceName,
+		Platform:   session.Platform,
+		AppVersion: session.AppVersion,
+		UserAgent:  session.UserAgent,
+		Status:     session.Status,
+		LoginAt:    loginAt.UTC().Format(time.RFC3339),
+	}
+	value, err := json.Marshal(item)
+	if err != nil {
+		LogRedisError(ctx, err)
+		return
+	}
+
+	if err := r.redisClient.HSet(ctx, cacheKey, session.DeviceId, value).Err(); err != nil {
+		task := mq.BuildHSetTask(cacheKey, session.DeviceId, value).
+			WithSource("DeviceRepository.storeDeviceInfoCache").
+			WithMaxRetries(5)
+		LogAndRetryRedisError(ctx, task, err)
+	}
 }
 
 // StoreAccessToken 将 AccessToken 存入 Redis

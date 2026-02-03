@@ -89,9 +89,10 @@ func buildServerOptions(opts Options) []grpc.ServerOption {
 	// 执行顺序：Recovery(最外层) -> RateLimit -> Metrics -> Logging(最内层）
 	unaryInters := []grpc.UnaryServerInterceptor{
 		interceptors.RecoveryUnaryInterceptor(),  // 1. panic 恢复
-		interceptors.RateLimitUnaryInterceptor(), // 2. 全局限流（使用默认配置）
-		interceptors.MetricsUnaryInterceptor(),   // 3. 监控指标（QPS、耗时等）
-		interceptors.LoggingUnaryInterceptor(),   // 4. 日志记录
+		interceptors.MetadataUnaryInterceptor(),  // 2. 注入 metadata 到 context
+		interceptors.RateLimitUnaryInterceptor(), // 3. 全局限流（使用默认配置）
+		interceptors.MetricsUnaryInterceptor(),   // 4. 监控指标（QPS、耗时等）
+		interceptors.LoggingUnaryInterceptor(),   // 5. 日志记录
 	}
 	unaryInters = append(unaryInters, opts.UnaryInterceptors...)                // 添加自定义拦截器
 	serverOpts = append(serverOpts, grpc.ChainUnaryInterceptor(unaryInters...)) // 构建拦截器链

@@ -60,7 +60,26 @@
 
 ---
 
-### 2.3 用户信息缓存
+### 2.3 设备信息缓存
+
+| Key Pattern | 数据类型 | TTL | Repository | 说明 |
+|-------------|----------|-----|------------|------|
+| `user:devices:{user_uuid}` | Hash | - | `device_repository` | 设备详情缓存（field=device_id, value=json） |
+
+value JSON 字段示例：
+```json
+{"deviceId":"device-001","deviceName":"我的iPhone","platform":"iOS","appVersion":"1.0.0","userAgent":"iOS/1.0.0 (17.2)","status":0,"loginAt":"2026-01-19T10:00:00Z"}
+```
+
+#### 操作函数
+
+| 函数 | 操作 | Key |
+|------|------|-----|
+| `storeDeviceInfoCache()` | HSET | `user:devices:{user_uuid}` |
+
+---
+
+### 2.4 用户信息缓存
 
 | Key Pattern | 数据类型 | TTL | Repository | 说明 |
 |-------------|----------|-----|------------|------|
@@ -80,7 +99,7 @@
 
 ---
 
-### 2.4 二维码
+### 2.5 二维码
 
 | Key Pattern | 数据类型 | TTL | Repository | 说明 |
 |-------------|----------|-----|------------|------|
