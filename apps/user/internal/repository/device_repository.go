@@ -308,6 +308,10 @@ func (r *deviceRepositoryImpl) GetRefreshToken(ctx context.Context, userUUID, de
 
 // DeleteTokens 删除设备的所有 Token（用于踢出设备）
 func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, deviceID string) error {
+	if r.redisClient == nil {
+		return nil
+	}
+
 	atKey := r.accessTokenKey(userUUID, deviceID)
 	rtKey := r.refreshTokenKey(userUUID, deviceID)
 
@@ -366,10 +370,148 @@ func (r *deviceRepositoryImpl) GetOnlineDevices(ctx context.Context, userUUID st
 
 // BatchGetOnlineStatus 批量获取用户在线状态
 func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUIDs []string) (map[string][]*model.DeviceSession, error) {
+	result := make(map[string][]*model.DeviceSession, len(userUUIDs))
 	if len(userUUIDs) == 0 {
-		return nil, nil // TODO: 批量获取用户在线状态
+		return result, nil
 	}
-	return nil, nil // TODO: 批量获取用户在线状态
+
+	// 先做去重，避免重复查询同一用户。
+	uniqueUsers := make([]string, 0, len(userUUIDs))
+	seenUsers := make(map[string]struct{}, len(userUUIDs))
+	for _, userUUID := range userUUIDs {
+		if userUUID == "" {
+			continue
+		}
+		if _, ok := seenUsers[userUUID]; ok {
+			continue
+		}
+		seenUsers[userUUID] = struct{}{}
+		uniqueUsers = append(uniqueUsers, userUUID)
+	}
+	if len(uniqueUsers) == 0 {
+		return result, nil
+	}
+
+	// 1) Redis 优先：读取设备信息缓存 user:devices:{user_uuid}
+	missedUsers := make([]string, 0, len(uniqueUsers))
+	if r.redisClient != nil {
+		pipe := r.redisClient.Pipeline()
+		cacheCmds := make(map[string]*redis.MapStringStringCmd, len(uniqueUsers))
+		for _, userUUID := range uniqueUsers {
+			cacheCmds[userUUID] = pipe.HGetAll(ctx, r.deviceInfoKey(userUUID))
+		}
+
+		_, err := pipe.Exec(ctx)
+		if err != nil && err != redis.Nil {
+			// Redis 故障时降级到 MySQL
+			LogRedisError(ctx, err)
+			missedUsers = append(missedUsers, uniqueUsers...)
+		} else {
+			for _, userUUID := range uniqueUsers {
+				entries := cacheCmds[userUUID].Val()
+				if len(entries) == 0 {
+					missedUsers = append(missedUsers, userUUID)
+					continue
+				}
+
+				sessions := make([]*model.DeviceSession, 0, len(entries))
+				parseErrCount := 0
+				for _, raw := range entries {
+					var item deviceCacheItem
+					if err := json.Unmarshal([]byte(raw), &item); err != nil {
+						parseErrCount++
+						continue
+					}
+					sessions = append(sessions, &model.DeviceSession{
+						UserUuid:   userUUID,
+						DeviceId:   item.DeviceID,
+						DeviceName: item.DeviceName,
+						Platform:   item.Platform,
+						AppVersion: item.AppVersion,
+						UserAgent:  item.UserAgent,
+						Status:     item.Status,
+					})
+				}
+
+				// 缓存脏数据或全解析失败时，回源 MySQL。
+				if len(sessions) == 0 && parseErrCount > 0 {
+					missedUsers = append(missedUsers, userUUID)
+					continue
+				}
+				result[userUUID] = sessions
+			}
+		}
+	} else {
+		missedUsers = append(missedUsers, uniqueUsers...)
+	}
+
+	// 2) 回源 MySQL：仅查询 Redis 未命中的用户
+	if len(missedUsers) > 0 {
+		var dbSessions []*model.DeviceSession
+		err := r.db.WithContext(ctx).
+			Where("user_uuid IN ?", missedUsers).
+			Order("updated_at DESC, id DESC").
+			Find(&dbSessions).Error
+		if err != nil {
+			return nil, WrapDBError(err)
+		}
+
+		dbGrouped := make(map[string][]*model.DeviceSession, len(missedUsers))
+		for _, session := range dbSessions {
+			if session == nil || session.UserUuid == "" {
+				continue
+			}
+			dbGrouped[session.UserUuid] = append(dbGrouped[session.UserUuid], session)
+		}
+
+		for _, userUUID := range missedUsers {
+			// 未查到时保持零值（nil 切片），上层按离线处理。
+			result[userUUID] = dbGrouped[userUUID]
+		}
+
+		// 3) 尽力回填 Redis 缓存（不阻塞主流程）
+		if r.redisClient != nil && len(dbSessions) > 0 {
+			pipe := r.redisClient.Pipeline()
+			touchedUsers := make(map[string]struct{}, len(dbSessions))
+			for _, session := range dbSessions {
+				if session == nil || session.UserUuid == "" || session.DeviceId == "" {
+					continue
+				}
+				item := deviceCacheItem{
+					DeviceID:   session.DeviceId,
+					DeviceName: session.DeviceName,
+					Platform:   session.Platform,
+					AppVersion: session.AppVersion,
+					UserAgent:  session.UserAgent,
+					Status:     session.Status,
+					LoginAt:    session.UpdatedAt.UTC().Format(time.RFC3339),
+				}
+				value, mErr := json.Marshal(item)
+				if mErr != nil {
+					continue
+				}
+
+				key := r.deviceInfoKey(session.UserUuid)
+				pipe.HSet(ctx, key, session.DeviceId, value)
+				touchedUsers[session.UserUuid] = struct{}{}
+			}
+			for userUUID := range touchedUsers {
+				pipe.Expire(ctx, r.deviceInfoKey(userUUID), rediskey.DeviceInfoTTL)
+			}
+			if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+				LogRedisError(ctx, err)
+			}
+		}
+	}
+
+	// 补齐空键，确保每个请求用户在返回 map 中都有条目。
+	for _, userUUID := range uniqueUsers {
+		if _, ok := result[userUUID]; !ok {
+			result[userUUID] = nil
+		}
+	}
+
+	return result, nil
 }
 
 // UpdateToken 更新Token

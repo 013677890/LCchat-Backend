@@ -137,6 +137,10 @@ func (h *DeviceHandler) BatchGetOnlineStatus(c *gin.Context) {
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
+	if len(req.UserUUIDs) > 100 {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
 
 	resp, err := h.deviceService.BatchGetOnlineStatus(ctx, &req)
 	if err != nil {
