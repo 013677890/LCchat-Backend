@@ -22,7 +22,7 @@ type DeviceItem struct {
 	Platform        string `json:"platform"`        // 平台
 	AppVersion      string `json:"appVersion"`      // 应用版本
 	IsCurrentDevice bool   `json:"isCurrentDevice"` // 是否当前设备
-	Status          int32  `json:"status"`          // 状态(0:在线 1:下线 2:注销)
+	Status          int32  `json:"status"`          // 状态(0:在线 1:离线 2:注销 3:被踢出)
 	LastSeenAt      string `json:"lastSeenAt"`      // 最后活跃时间（RFC3339）
 }
 

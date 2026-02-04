@@ -4,6 +4,7 @@ import (
 	"ChatServer/apps/user/internal/repository"
 	pb "ChatServer/apps/user/pb"
 	"ChatServer/consts"
+	"ChatServer/model"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/util"
 	"context"
@@ -152,10 +153,10 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *pb.KickDeviceRe
 		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
 
-	// status 语义：0=在线, 1=离线(被踢), 2=注销。
-	// 注销设备保持 2；在线设备切到 1；已离线设备幂等成功。
-	if session.Status == 0 {
-		if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, 1); err != nil {
+	// status 语义：0=在线, 1=离线, 2=注销, 3=被踢出。
+	// 踢设备时：在线/离线 -> 被踢出；注销/已被踢出保持原状态，按幂等成功。
+	if session.Status == model.DeviceStatusOnline || session.Status == model.DeviceStatusOffline {
+		if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusKicked); err != nil {
 			if errors.Is(err, repository.ErrRecordNotFound) {
 				return status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
 			}
@@ -243,7 +244,7 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *pb.GetOnli
 		}
 
 		// 在线判定：状态=在线 且 (当前时间 - Redis 活跃时间) <= 窗口。
-		if session.Status == 0 && nowSec-seenSec <= windowSec {
+		if session.Status == model.DeviceStatusOnline && nowSec-seenSec <= windowSec {
 			isOnline = true
 			if session.Platform != "" {
 				platformSet[session.Platform] = struct{}{}
@@ -341,7 +342,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 			if seenSec > lastSeenSec {
 				lastSeenSec = seenSec
 			}
-			if session.Status == 0 && nowSec-seenSec <= windowSec {
+			if session.Status == model.DeviceStatusOnline && nowSec-seenSec <= windowSec {
 				isOnline = true
 			}
 		}

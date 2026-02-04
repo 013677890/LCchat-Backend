@@ -97,6 +97,8 @@ func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, devi
 // UpsertSession 创建或更新设备会话（Upsert）
 func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model.DeviceSession) error {
 	now := time.Now()
+	onlineStatus := model.DeviceStatusOnline
+	session.Status = onlineStatus
 
 	// 直接执行 INSERT ... ON DUPLICATE KEY UPDATE
 	// 当唯一索引冲突时（user_uuid + device_id 已存在），执行 UPDATE
@@ -105,18 +107,18 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 			INSERT INTO device_session (
 				user_uuid, device_id, device_name, platform, 
 				app_version, ip, user_agent, status, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				device_name = VALUES(device_name),
 				platform = VALUES(platform),
 				app_version = VALUES(app_version),
 				ip = VALUES(ip),
 				user_agent = VALUES(user_agent),
-				status = 0,
+				status = ?,
 				updated_at = VALUES(updated_at)
 		`,
 			session.UserUuid, session.DeviceId, session.DeviceName, session.Platform,
-			session.AppVersion, session.IP, session.UserAgent, now, now,
+			session.AppVersion, session.IP, session.UserAgent, onlineStatus, now, now, onlineStatus,
 		).Error
 
 	if err != nil {

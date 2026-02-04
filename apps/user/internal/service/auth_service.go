@@ -250,7 +250,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
-		Status:     0, // 0: 在线
+		Status:     model.DeviceStatusOnline, // 在线
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
@@ -409,7 +409,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
-		Status:     0, // 0: 在线
+		Status:     model.DeviceStatusOnline, // 在线
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
@@ -687,7 +687,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 	}
 
 	// 3. 登出语义为注销设备会话（status=2），设备不存在视为幂等成功。
-	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, 2); err != nil {
+	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusLoggedOut); err != nil {
 		if !errors.Is(err, repository.ErrRecordNotFound) {
 			logger.Error(ctx, "更新设备注销状态失败",
 				logger.String("user_uuid", userUUID),
