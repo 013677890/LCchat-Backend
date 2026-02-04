@@ -350,6 +350,30 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
+
+	// Redis-first 场景下同步更新设备缓存状态，避免读到旧状态。
+	if r.redisClient != nil {
+		cacheKey := r.deviceInfoKey(userUUID)
+		raw, err := r.redisClient.HGet(ctx, cacheKey, deviceID).Result()
+		if err == nil {
+			var item deviceCacheItem
+			if unmarshalErr := json.Unmarshal([]byte(raw), &item); unmarshalErr == nil {
+				item.Status = status
+				value, marshalErr := json.Marshal(item)
+				if marshalErr == nil {
+					pipe := r.redisClient.Pipeline()
+					pipe.HSet(ctx, cacheKey, deviceID, value)
+					pipe.Expire(ctx, cacheKey, rediskey.DeviceInfoTTL)
+					if _, pipeErr := pipe.Exec(ctx); pipeErr != nil && pipeErr != redis.Nil {
+						LogRedisError(ctx, pipeErr)
+					}
+				}
+			}
+		} else if err != redis.Nil {
+			LogRedisError(ctx, err)
+		}
+	}
+
 	return nil
 }
 
@@ -433,8 +457,8 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 					})
 				}
 
-				// 缓存脏数据或全解析失败时，回源 MySQL。
-				if len(sessions) == 0 && parseErrCount > 0 {
+				// 缓存脏数据时回源 MySQL，避免返回不完整设备列表。
+				if parseErrCount > 0 {
 					missedUsers = append(missedUsers, userUUID)
 					continue
 				}

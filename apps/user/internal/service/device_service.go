@@ -44,7 +44,7 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDevice
 
 	deviceID := util.GetDeviceIDFromContext(ctx)
 
-	sessions, err := s.deviceRepo.GetByUserUUID(ctx, userUUID)
+	sessionsByUser, err := s.deviceRepo.BatchGetOnlineStatus(ctx, []string{userUUID})
 	if err != nil {
 		logger.Error(ctx, "获取设备列表失败",
 			logger.String("user_uuid", userUUID),
@@ -52,6 +52,7 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDevice
 		)
 		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
+	sessions := sessionsByUser[userUUID]
 
 	deviceIDs := make([]string, 0, len(sessions))
 	for _, session := range sessions {
@@ -97,6 +98,13 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDevice
 			LastSeenAt:      lastSeenAt,
 		})
 	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		if devices[i].LastSeenAt == devices[j].LastSeenAt {
+			return devices[i].DeviceId < devices[j].DeviceId
+		}
+		return devices[i].LastSeenAt > devices[j].LastSeenAt
+	})
 
 	return &pb.GetDeviceListResponse{Devices: devices}, nil
 }

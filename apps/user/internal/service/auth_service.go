@@ -250,7 +250,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
-		Status:     0,                             // 0: 在线
+		Status:     0, // 0: 在线
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
@@ -261,7 +261,18 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 		// 这里只记录日志，不返回错误
 	}
 
-	// 10. 登录成功
+	// 10. 登录成功后立即写入活跃时间，确保在线状态可立即查询。
+	if deviceID != "" {
+		if err := s.deviceRepo.SetActiveTimestamp(ctx, user.Uuid, deviceID, time.Now().Unix()); err != nil {
+			logger.Warn(ctx, "写入设备活跃时间失败",
+				logger.String("user_uuid", user.Uuid),
+				logger.String("device_id", deviceID),
+				logger.ErrorField("error", err),
+			)
+		}
+	}
+
+	// 11. 登录成功
 	logger.Info(ctx, "用户登录成功",
 		logger.String("account", utils.MaskEmail(req.Account)),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
@@ -398,7 +409,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		AppVersion: req.DeviceInfo.GetAppVersion(),
 		IP:         clientIP,
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
-		Status:     0,                             // 0: 在线
+		Status:     0, // 0: 在线
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
@@ -409,7 +420,18 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		// 这里只记录日志，不返回错误
 	}
 
-	// 10. 登录成功，记录日志
+	// 10. 登录成功后立即写入活跃时间，确保在线状态可立即查询。
+	if deviceID != "" {
+		if err := s.deviceRepo.SetActiveTimestamp(ctx, user.Uuid, deviceID, time.Now().Unix()); err != nil {
+			logger.Warn(ctx, "写入设备活跃时间失败",
+				logger.String("user_uuid", user.Uuid),
+				logger.String("device_id", deviceID),
+				logger.ErrorField("error", err),
+			)
+		}
+	}
+
+	// 11. 登录成功，记录日志
 	logger.Info(ctx, "验证码登录成功",
 		logger.String("email", utils.MaskEmail(req.Email)),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
@@ -638,6 +660,10 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 // 错误码映射：
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) error {
+	if req == nil || req.DeviceId == "" {
+		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
 	// 记录登出请求
 	logger.Info(ctx, "用户登出请求",
 		logger.String("device_id", req.DeviceId),
@@ -660,7 +686,32 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
 
-	// 3. 登出成功
+	// 3. 登出语义为注销设备会话（status=2），设备不存在视为幂等成功。
+	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, 2); err != nil {
+		if !errors.Is(err, repository.ErrRecordNotFound) {
+			logger.Error(ctx, "更新设备注销状态失败",
+				logger.String("user_uuid", userUUID),
+				logger.String("device_id", req.DeviceId),
+				logger.ErrorField("error", err),
+			)
+			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		}
+		logger.Warn(ctx, "登出时设备会话不存在，按幂等成功处理",
+			logger.String("user_uuid", userUUID),
+			logger.String("device_id", req.DeviceId),
+		)
+	}
+
+	// 4. 写入最后活跃时间（尽力而为，不阻塞登出）。
+	if err := s.deviceRepo.SetActiveTimestamp(ctx, userUUID, req.DeviceId, time.Now().Unix()); err != nil {
+		logger.Warn(ctx, "写入登出活跃时间失败",
+			logger.String("user_uuid", userUUID),
+			logger.String("device_id", req.DeviceId),
+			logger.ErrorField("error", err),
+		)
+	}
+
+	// 5. 登出成功
 	logger.Info(ctx, "用户登出成功",
 		logger.String("user_uuid", userUUID),
 		logger.String("device_id", req.DeviceId),
