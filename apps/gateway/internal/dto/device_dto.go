@@ -41,7 +41,10 @@ type GetOnlineStatusRequest struct {
 
 // GetOnlineStatusResponse 获取在线状态响应 DTO
 type GetOnlineStatusResponse struct {
-	Status *OnlineStatus `json:"status"` // 在线状态
+	UserUUID        string   `json:"userUuid"`        // 用户UUID
+	IsOnline        bool     `json:"isOnline"`        // 是否在线
+	LastSeenAt      string   `json:"lastSeenAt"`      // 最后活跃时间（RFC3339）
+	OnlinePlatforms []string `json:"onlinePlatforms"` // 在线的平台列表
 }
 
 // OnlineStatus 在线状态 DTO（用于单个用户）
@@ -187,8 +190,21 @@ func ConvertGetOnlineStatusResponseFromProto(pb *userpb.GetOnlineStatusResponse)
 		return nil
 	}
 
+	status := pb.Status
+	if status == nil {
+		return &GetOnlineStatusResponse{
+			UserUUID:        "",
+			IsOnline:        false,
+			LastSeenAt:      "",
+			OnlinePlatforms: []string{},
+		}
+	}
+
 	return &GetOnlineStatusResponse{
-		Status: ConvertOnlineStatusFromProto(pb.Status),
+		UserUUID:        status.UserUuid,
+		IsOnline:        status.IsOnline,
+		LastSeenAt:      util.FormatUnixMilliRFC3339(status.LastSeenAt),
+		OnlinePlatforms: status.OnlinePlatforms,
 	}
 }
 

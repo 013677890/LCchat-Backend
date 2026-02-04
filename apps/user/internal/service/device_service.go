@@ -8,6 +8,7 @@ import (
 	"ChatServer/pkg/util"
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 type deviceServiceImpl struct {
 	deviceRepo repository.IDeviceRepository
 }
+
+const (
+	// 设备在线判定窗口：15 分钟。
+	// 网关活跃时间写入为 10 分钟节流，窗口需大于节流间隔以降低误判。
+	deviceOnlineWindow = 15 * time.Minute
+)
 
 // NewDeviceService 创建设备服务实例
 func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
@@ -164,7 +171,91 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *pb.KickDeviceRe
 
 // GetOnlineStatus 获取用户在线状态
 func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取用户在线状态功能暂未实现")
+	if req == nil || req.UserUuid == "" {
+		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	sessions, err := s.deviceRepo.GetByUserUUID(ctx, req.UserUuid)
+	if err != nil {
+		logger.Error(ctx, "获取在线状态失败：查询设备会话失败",
+			logger.String("user_uuid", req.UserUuid),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 无设备会话，直接离线返回。
+	if len(sessions) == 0 {
+		return &pb.GetOnlineStatusResponse{
+			Status: &pb.OnlineStatus{
+				UserUuid:        req.UserUuid,
+				IsOnline:        false,
+				LastSeenAt:      0,
+				OnlinePlatforms: []string{},
+			},
+		}, nil
+	}
+
+	deviceIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.DeviceId == "" {
+			continue
+		}
+		deviceIDs = append(deviceIDs, session.DeviceId)
+	}
+
+	activeTimes, err := s.deviceRepo.GetActiveTimestamps(ctx, req.UserUuid, deviceIDs)
+	if err != nil {
+		logger.Warn(ctx, "获取在线状态失败：读取设备活跃时间失败，按离线处理",
+			logger.String("user_uuid", req.UserUuid),
+			logger.ErrorField("error", err),
+		)
+		activeTimes = map[string]int64{}
+	}
+
+	nowSec := time.Now().Unix()
+	windowSec := int64(deviceOnlineWindow.Seconds())
+
+	platformSet := make(map[string]struct{})
+	isOnline := false
+	var lastSeenSec int64
+
+	for _, session := range sessions {
+		if session == nil || session.DeviceId == "" {
+			continue
+		}
+
+		seenSec, ok := activeTimes[session.DeviceId]
+		if !ok || seenSec <= 0 {
+			continue
+		}
+		if seenSec > lastSeenSec {
+			lastSeenSec = seenSec
+		}
+
+		// 在线判定：状态=在线 且 (当前时间 - Redis 活跃时间) <= 窗口。
+		if session.Status == 0 && nowSec-seenSec <= windowSec {
+			isOnline = true
+			if session.Platform != "" {
+				platformSet[session.Platform] = struct{}{}
+			}
+		}
+	}
+
+	platforms := make([]string, 0, len(platformSet))
+	for p := range platformSet {
+		platforms = append(platforms, p)
+	}
+	sort.Strings(platforms)
+
+	return &pb.GetOnlineStatusResponse{
+		Status: &pb.OnlineStatus{
+			UserUuid:        req.UserUuid,
+			IsOnline:        isOnline,
+			LastSeenAt:      lastSeenSec * 1000,
+			OnlinePlatforms: platforms,
+		},
+	}, nil
 }
 
 // BatchGetOnlineStatus 批量获取在线状态
