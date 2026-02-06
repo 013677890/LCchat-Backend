@@ -32,14 +32,14 @@ type MinIOConfig struct {
 // DefaultMinIOConfig 返回本地开发的默认配置
 func DefaultMinIOConfig() MinIOConfig {
 	return MinIOConfig{
-		// 连接配置（与 docker-compose.yml 对齐）
-		Endpoint:        "minio:9000",
-		AccessKeyID:     "minioadmin",
-		SecretAccessKey: "minioadmin",
-		UseSSL:          false,
+		// 连接配置（优先读取环境变量）
+		Endpoint:        getenvString("MINIO_ENDPOINT", "minio:9000"),
+		AccessKeyID:     getenvString("MINIO_ACCESS_KEY", "minioadmin"),
+		SecretAccessKey: getenvString("MINIO_SECRET_KEY", "minioadmin"),
+		UseSSL:          getenvBool("MINIO_USE_SSL", false),
 
 		// Bucket 配置
-		BucketName: "chatserver",
+		BucketName: getenvString("MINIO_BUCKET", "chatserver"),
 		Location:   "us-east-1",
 
 		// 上传配置
@@ -48,8 +48,8 @@ func DefaultMinIOConfig() MinIOConfig {
 		UploadTimeout: 30 * time.Second,
 
 		// 访问配置
-		PublicRead: true,                    // 图片公开访问
-		BaseURL:    "http://localhost:9000", // 本地开发访问地址
+		PublicRead: getenvBool("MINIO_PUBLIC_READ", true),                   // 图片公开访问
+		BaseURL:    getenvString("MINIO_BASE_URL", "http://localhost:9000"), // 本地开发访问地址
 
 		// 连接池配置
 		MaxIdleConns:        100,

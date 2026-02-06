@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"ChatServer/apps/user/internal/handler"
@@ -175,8 +176,13 @@ func main() {
 	util.InitSnowflake(1) // 雪花算法
 
 	// 9. 启动 gRPC Server
+	grpcAddr := os.Getenv("USER_GRPC_ADDR")
+	if grpcAddr == "" {
+		grpcAddr = ":9090"
+	}
+
 	opts := server.Options{
-		Address:          ":9090",
+		Address:          grpcAddr,
 		EnableHealth:     true,
 		EnableReflection: true, // 生产环境建议关闭
 	}
@@ -211,7 +217,10 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", interceptors.GetMetricsHandler())
 
-	metricsAddr := ":9091"
+	metricsAddr := os.Getenv("USER_METRICS_ADDR")
+	if metricsAddr == "" {
+		metricsAddr = ":9091"
+	}
 	metricsServer := &http.Server{
 		Addr:    metricsAddr,
 		Handler: metricsMux,

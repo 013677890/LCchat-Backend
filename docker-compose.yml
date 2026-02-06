@@ -1,99 +1,176 @@
-version: '3.8'
-
 services:
-  # --- Gateway 网关服务 ---
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: gateway
-    working_dir: /app/apps/gateway
-    command: ["go", "run", "cmd/main.go"]
-    ports:
-      - "8080:8080"
-    volumes:
-      # 把本地代码挂载进容器，便于开发调试
-      - ./:/app
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    restart: unless-stopped
+    command:
+      - mysqld
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     environment:
-      # 服务配置
-      GIN_MODE: release
-      USER_SERVICE_ADDR: user:9090
-    depends_on:
-      - user
-      - mysql
-      - redis
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-chat_server}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./config/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     networks:
       - chat-network
 
-  # --- User 用户服务 ---
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.2}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - chat-network
+
+  kafka:
+    image: ${KAFKA_IMAGE:-bitnami/kafka:3.7}
+    restart: unless-stopped
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - chat-network
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-01-20T14-49-07Z}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - chat-network
+
   user:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: user
+    restart: unless-stopped
     working_dir: /app/apps/user
     command: ["go", "run", "cmd/main.go"]
-    ports:
-      - "9090:9090"
-    volumes:
-      # 把本地代码挂载进容器，便于开发调试
-      - ./:/app
+    env_file:
+      - ./deploy/env/chatserver.env
     environment:
-      # 数据库配置
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: chat_server
-      # Redis 配置
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ""
-      REDIS_DB: 0
+      TZ: ${TZ:-UTC}
+      USER_GRPC_ADDR: ":9090"
+      USER_METRICS_ADDR: ":9091"
     depends_on:
-      - mysql
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${USER_GRPC_PORT:-9090}:9090"
+      - "${USER_METRICS_PORT:-9091}:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9090' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     networks:
       - chat-network
 
-  # --- MySQL 数据库服务 ---
-  mysql:
-    image: mysql:8.0
-    container_name: mysql
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/apps/gateway
+    command: ["go", "run", "cmd/main.go"]
+    env_file:
+      - ./deploy/env/chatserver.env
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: chat_server
-      MYSQL_USER: chat_user
-      MYSQL_PASSWORD: chat_password
+      TZ: ${TZ:-UTC}
+      GIN_MODE: ${GIN_MODE:-release}
+      USER_SERVICE_ADDR: "user:9090"
+      GATEWAY_ADDR: ":8080"
+    depends_on:
+      user:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
-      - "3306:3306"
-    volumes:
-      - ./data/mysql:/var/lib/mysql
-      - ./config/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - "${GATEWAY_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     networks:
       - chat-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # --- Redis 缓存服务 ---
-  redis:
-    image: redis:7.0
-    container_name: redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - ./data/redis:/data
-    networks:
-      - chat-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  blackbox:
+    image: curlimages/curl:8.13.0
+    profiles: ["blackbox"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    command:
+      - sh
+      - -ec
+      - |
+        echo "[blackbox] waiting gateway..."
+        until curl -fsS http://gateway:8080/health >/dev/null; do sleep 1; done
+        echo "[blackbox] gateway health ok"
+        curl -fsS http://gateway:8080/health
+        code=$$(curl -s -o /dev/null -w "%{http_code}" http://gateway:8080/api/v1/auth/blacklist)
+        test "$$code" = "401"
+        echo "[blackbox] auth middleware smoke check passed"
 
 networks:
   chat-network:
     driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:

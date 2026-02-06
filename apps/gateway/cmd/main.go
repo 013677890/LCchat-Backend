@@ -8,8 +8,8 @@ import (
 	"ChatServer/apps/gateway/internal/service"
 	"ChatServer/config"
 	"ChatServer/consts/redisKey"
-	"ChatServer/pkg/deviceactive"
 	"ChatServer/pkg/async"
+	"ChatServer/pkg/deviceactive"
 	"ChatServer/pkg/logger"
 	pkgminio "ChatServer/pkg/minio"
 	pkgredis "ChatServer/pkg/redis"
@@ -142,8 +142,10 @@ func main() {
 	}
 
 	// 5. 初始化 gRPC 客户端（依赖注入）
-	// TODO: 从配置文件读取user服务地址
-	userServiceAddr := "localhost:9090"
+	userServiceAddr := os.Getenv("USER_SERVICE_ADDR")
+	if userServiceAddr == "" {
+		userServiceAddr = "localhost:9090"
+	}
 
 	// 5.1 创建熔断器
 	userServiceBreaker := pb.CreateCircuitBreaker("user-service")
@@ -200,13 +202,19 @@ func main() {
 
 	// 8. 初始化路由（依赖注入）
 	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
-	gin.SetMode(gin.ReleaseMode)
+	ginMode := os.Getenv("GIN_MODE")
+	if ginMode == "" {
+		ginMode = gin.ReleaseMode
+	}
+	gin.SetMode(ginMode)
 	r := router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
 	logger.Info(ctx, "路由初始化完成")
 
 	// 9. 配置服务器
-	port := 8080 // TODO: 从配置文件读取
-	addr := "127.0.0.1:" + fmt.Sprintf("%d", port)
+	addr := os.Getenv("GATEWAY_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
 
 	srv := &http.Server{
 		Addr:           addr,
@@ -220,7 +228,6 @@ func main() {
 	go func() {
 		logger.Info(ctx, "Gateway 服务器启动中",
 			logger.String("address", addr),
-			logger.Int("port", port),
 		)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

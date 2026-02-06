@@ -39,10 +39,14 @@ type KafkaConsumerConfig struct {
 
 // DefaultKafkaConfig 返回本地开发的默认配置
 func DefaultKafkaConfig() KafkaConfig {
+	brokers := splitCSV(getenvString("KAFKA_BROKERS", "kafka:9092"))
+	if len(brokers) == 0 {
+		brokers = []string{"kafka:9092"}
+	}
+
 	return KafkaConfig{
-		// Docker compose 中的 Kafka 地址
-		Brokers:         []string{"kafka:9092"},
-		RedisRetryTopic: "redis-retry-queue",
+		Brokers:         brokers,
+		RedisRetryTopic: getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
 
 		ProducerConfig: KafkaProducerConfig{
 			BatchSize:    100,
@@ -52,7 +56,7 @@ func DefaultKafkaConfig() KafkaConfig {
 		},
 
 		ConsumerConfig: KafkaConsumerConfig{
-			GroupID:           "redis-retry-consumer-group",
+			GroupID:           getenvString("KAFKA_RETRY_GROUP_ID", "redis-retry-consumer-group"),
 			MinBytes:          1,        // 1 字节即可触发读取
 			MaxBytes:          10 << 20, // 10MB
 			MaxWait:           500 * time.Millisecond,
