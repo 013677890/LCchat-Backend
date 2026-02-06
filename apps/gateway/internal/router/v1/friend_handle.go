@@ -88,12 +88,6 @@ func (h *FriendHandler) GetFriendApplyList(c *gin.Context) {
 		return
 	}
 
-	// 1.1 如果未传 status，则查询全部状态
-	// 说明：status=0 是合法值（待处理），不能用默认值判断
-	if c.Query("status") == "" {
-		req.Status = -1
-	}
-
 	// 2. 设置默认值
 	if req.Page == 0 {
 		req.Page = 1
@@ -144,12 +138,6 @@ func (h *FriendHandler) GetSentApplyList(c *gin.Context) {
 		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
 		result.Fail(c, nil, consts.CodeParamError)
 		return
-	}
-
-	// 1.1 如果未传 status，则查询全部状态
-	// 说明：status=0 是合法值（待处理），不能用默认值判断
-	if c.Query("status") == "" {
-		req.Status = -1
 	}
 
 	// 2. 设置默认值

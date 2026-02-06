@@ -26,20 +26,20 @@ import (
 )
 
 type fakeRouterFriendService struct {
-	sendApplyFn      func(context.Context, *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error)
-	applyListFn      func(context.Context, *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error)
-	sentApplyListFn  func(context.Context, *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error)
-	handleApplyFn    func(context.Context, *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error)
-	unreadCountFn    func(context.Context, *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error)
-	markReadFn       func(context.Context, *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error)
-	friendListFn     func(context.Context, *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error)
-	syncFn           func(context.Context, *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error)
-	deleteFn         func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
-	remarkFn         func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
-	tagFn            func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-	getTagListFn     func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
-	checkFn          func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
-	getRelationFn    func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
+	sendApplyFn     func(context.Context, *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error)
+	applyListFn     func(context.Context, *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error)
+	sentApplyListFn func(context.Context, *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error)
+	handleApplyFn   func(context.Context, *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error)
+	unreadCountFn   func(context.Context, *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error)
+	markReadFn      func(context.Context, *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error)
+	friendListFn    func(context.Context, *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error)
+	syncFn          func(context.Context, *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error)
+	deleteFn        func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
+	remarkFn        func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
+	tagFn           func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
+	getTagListFn    func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
+	checkFn         func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
+	getRelationFn   func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
 }
 
 var _ service.FriendService = (*fakeRouterFriendService)(nil)
@@ -276,6 +276,19 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 			},
 		},
 		{
+			name:   "mark_apply_read",
+			method: http.MethodPost,
+			target: "/api/v1/auth/friend/apply/read",
+			body:   `{"applyIds":[1,2]}`,
+			setup: func(s *fakeRouterFriendService, called *bool) {
+				s.markReadFn = func(_ context.Context, req *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error) {
+					*called = true
+					require.Equal(t, []int64{1, 2}, req.ApplyIDs)
+					return &dto.MarkApplyAsReadResponse{}, nil
+				}
+			},
+		},
+		{
 			name:   "get_friend_list",
 			method: http.MethodGet,
 			target: "/api/v1/auth/friend/list?Page=1&PageSize=20",
@@ -283,6 +296,19 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 				s.friendListFn = func(_ context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
 					*called = true
 					require.Equal(t, int32(1), req.Page)
+					return &dto.GetFriendListResponse{}, nil
+				}
+			},
+		},
+		{
+			name:   "get_friend_list_default_pagination",
+			method: http.MethodGet,
+			target: "/api/v1/auth/friend/list",
+			setup: func(s *fakeRouterFriendService, called *bool) {
+				s.friendListFn = func(_ context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
+					*called = true
+					require.Equal(t, int32(1), req.Page)
+					require.Equal(t, int32(20), req.PageSize)
 					return &dto.GetFriendListResponse{}, nil
 				}
 			},
@@ -418,7 +444,7 @@ func TestRouterFriendParamErrors(t *testing.T) {
 		{
 			name:       "get_apply_list_invalid_query",
 			method:     http.MethodGet,
-			target:     "/api/v1/auth/friend/apply-list?page=abc",
+			target:     "/api/v1/auth/friend/apply-list?Page=abc",
 			wantStatus: http.StatusOK,
 			wantCode:   consts.CodeParamError,
 		},

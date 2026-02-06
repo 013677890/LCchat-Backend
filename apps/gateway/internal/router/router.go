@@ -122,7 +122,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				friend.GET("/apply/sent", friendHandler.GetSentApplyList)
 				friend.POST("/apply/handle", friendHandler.HandleFriendApply)
 				friend.GET("/apply/unread", friendHandler.GetUnreadApplyCount)
-				//friend.POST("/apply/read", friendHandler.MarkApplyAsRead)
+				friend.POST("/apply/read", friendHandler.MarkApplyAsRead)
 				friend.GET("/list", friendHandler.GetFriendList)
 				friend.POST("/sync", friendHandler.SyncFriendList)
 				friend.POST("/delete", friendHandler.DeleteFriend)

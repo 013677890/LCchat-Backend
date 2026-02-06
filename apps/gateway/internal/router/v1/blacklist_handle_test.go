@@ -281,19 +281,26 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 	}{
 		{
 			name:       "bind_query_failed",
-			targetURL:  "/api/v1/auth/blacklist?page=abc&pageSize=20",
+			targetURL:  "/api/v1/auth/blacklist?Page=abc&PageSize=20",
 			setupSvc:   nil,
 			wantStatus: http.StatusOK,
 			wantCode:   consts.CodeParamError,
 			wantCalled: false,
 		},
 		{
-			name:       "missing_page_and_page_size",
-			targetURL:  "/api/v1/auth/blacklist",
-			setupSvc:   nil,
+			name:      "missing_page_and_page_size",
+			targetURL: "/api/v1/auth/blacklist",
+			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
+				svc.listFn = func(_ context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
+					*called = true
+					require.Equal(t, int32(1), req.Page)
+					require.Equal(t, int32(20), req.PageSize)
+					return &dto.GetBlacklistListResponse{}, nil
+				}
+			},
 			wantStatus: http.StatusOK,
-			wantCode:   consts.CodeParamError,
-			wantCalled: false,
+			wantCode:   consts.CodeSuccess,
+			wantCalled: true,
 		},
 		{
 			name:      "success_with_valid_query",

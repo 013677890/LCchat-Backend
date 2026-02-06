@@ -24,20 +24,20 @@ import (
 )
 
 type fakeFriendHTTPService struct {
-	sendApplyFn      func(context.Context, *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error)
-	applyListFn      func(context.Context, *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error)
-	sentApplyListFn  func(context.Context, *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error)
-	handleApplyFn    func(context.Context, *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error)
-	unreadCountFn    func(context.Context, *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error)
-	markReadFn       func(context.Context, *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error)
-	friendListFn     func(context.Context, *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error)
-	syncFn           func(context.Context, *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error)
-	deleteFn         func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
-	remarkFn         func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
-	tagFn            func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-	getTagListFn     func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
-	checkFn          func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
-	getRelationFn    func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
+	sendApplyFn     func(context.Context, *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error)
+	applyListFn     func(context.Context, *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error)
+	sentApplyListFn func(context.Context, *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error)
+	handleApplyFn   func(context.Context, *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error)
+	unreadCountFn   func(context.Context, *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error)
+	markReadFn      func(context.Context, *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error)
+	friendListFn    func(context.Context, *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error)
+	syncFn          func(context.Context, *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error)
+	deleteFn        func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
+	remarkFn        func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
+	tagFn           func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
+	getTagListFn    func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
+	checkFn         func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
+	getRelationFn   func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
 }
 
 var _ service.FriendService = (*fakeFriendHTTPService)(nil)
@@ -258,7 +258,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 	t.Run("get_friend_apply_list_bind_failed", func(t *testing.T) {
 		h := NewFriendHandler(&fakeFriendHTTPService{})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?page=abc", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?Page=abc", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -269,12 +269,12 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 		assert.Equal(t, consts.CodeParamError, decodeFriendHandlerCode(t, w))
 	})
 
-	t.Run("get_friend_apply_list_default_status", func(t *testing.T) {
+	t.Run("get_friend_apply_list_default_status_pending", func(t *testing.T) {
 		called := false
 		h := NewFriendHandler(&fakeFriendHTTPService{
 			applyListFn: func(_ context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error) {
 				called = true
-				require.Equal(t, int32(-1), req.Status)
+				require.Equal(t, int32(0), req.Status)
 				require.Equal(t, int32(1), req.Page)
 				require.Equal(t, int32(20), req.PageSize)
 				return &dto.GetFriendApplyListResponse{}, nil
@@ -293,7 +293,55 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 		assert.True(t, called)
 	})
 
-	t.Run("get_sent_apply_list_default_status", func(t *testing.T) {
+	t.Run("get_friend_apply_list_status_all", func(t *testing.T) {
+		called := false
+		h := NewFriendHandler(&fakeFriendHTTPService{
+			applyListFn: func(_ context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error) {
+				called = true
+				require.Equal(t, int32(-1), req.Status)
+				require.Equal(t, int32(1), req.Page)
+				require.Equal(t, int32(20), req.PageSize)
+				return &dto.GetFriendApplyListResponse{}, nil
+			},
+		})
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?Status=-1&Page=1&PageSize=20", nil)
+		require.NoError(t, err)
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+
+		h.GetFriendApplyList(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, consts.CodeSuccess, decodeFriendHandlerCode(t, w))
+		assert.True(t, called)
+	})
+
+	t.Run("get_sent_apply_list_default_status_pending", func(t *testing.T) {
+		called := false
+		h := NewFriendHandler(&fakeFriendHTTPService{
+			sentApplyListFn: func(_ context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error) {
+				called = true
+				require.Equal(t, int32(0), req.Status)
+				require.Equal(t, int32(1), req.Page)
+				require.Equal(t, int32(20), req.PageSize)
+				return &dto.GetSentApplyListResponse{}, nil
+			},
+		})
+		w := httptest.NewRecorder()
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?Page=1&PageSize=20", nil)
+		require.NoError(t, err)
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+
+		h.GetSentApplyList(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, consts.CodeSuccess, decodeFriendHandlerCode(t, w))
+		assert.True(t, called)
+	})
+
+	t.Run("get_sent_apply_list_status_all", func(t *testing.T) {
 		called := false
 		h := NewFriendHandler(&fakeFriendHTTPService{
 			sentApplyListFn: func(_ context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error) {
@@ -305,7 +353,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?Status=-1&Page=1&PageSize=20", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req

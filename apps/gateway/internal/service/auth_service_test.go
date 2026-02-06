@@ -367,7 +367,7 @@ func TestGatewayAuthServiceLogout(t *testing.T) {
 
 		resp, err := svc.Logout(context.Background(), &dto.LogoutRequest{DeviceID: "d1"})
 		require.NoError(t, err)
-		require.Nil(t, resp)
+		require.NotNil(t, resp)
 	})
 
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
@@ -405,7 +405,7 @@ func TestGatewayAuthServiceResetPassword(t *testing.T) {
 			NewPassword: "pass999",
 		})
 		require.NoError(t, err)
-		require.Nil(t, resp)
+		require.NotNil(t, resp)
 	})
 
 	t.Run("downstream_error_passthrough", func(t *testing.T) {

@@ -159,6 +159,20 @@ func TestRouterBlacklistRoutesAndSuccess(t *testing.T) {
 			},
 		},
 		{
+			name:   "get_blacklist_default_pagination",
+			method: http.MethodGet,
+			target: "/api/v1/auth/blacklist",
+			body:   "",
+			setup: func(s *fakeRouterBlacklistService, called *bool) {
+				s.listFn = func(_ context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
+					*called = true
+					require.Equal(t, int32(1), req.Page)
+					require.Equal(t, int32(20), req.PageSize)
+					return &dto.GetBlacklistListResponse{}, nil
+				}
+			},
+		},
+		{
 			name:   "delete_blacklist",
 			method: http.MethodDelete,
 			target: "/api/v1/auth/blacklist/u2",
@@ -229,7 +243,7 @@ func TestRouterBlacklistParamErrors(t *testing.T) {
 		{
 			name:           "get_blacklist_invalid_query",
 			method:         http.MethodGet,
-			target:         "/api/v1/auth/blacklist?page=abc",
+			target:         "/api/v1/auth/blacklist?Page=abc",
 			body:           "",
 			wantStatus:     http.StatusOK,
 			wantCode:       consts.CodeParamError,

@@ -305,7 +305,7 @@ func ConvertRefreshTokenResponseFromProto(pb *userpb.RefreshTokenResponse) *Refr
 // ConvertLogoutResponseFromProto 将 Protobuf 登出响应转换为 DTO
 func ConvertLogoutResponseFromProto(pb *userpb.LogoutResponse) *LogoutResponse {
 	if pb == nil {
-		return nil
+		return &LogoutResponse{}
 	}
 	return &LogoutResponse{}
 }
@@ -313,7 +313,7 @@ func ConvertLogoutResponseFromProto(pb *userpb.LogoutResponse) *LogoutResponse {
 // ConvertResetPasswordResponseFromProto 将 Protobuf 重置密码响应转换为 DTO
 func ConvertResetPasswordResponseFromProto(pb *userpb.ResetPasswordResponse) *ResetPasswordResponse {
 	if pb == nil {
-		return nil
+		return &ResetPasswordResponse{}
 	}
 	return &ResetPasswordResponse{}
 }
