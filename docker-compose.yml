@@ -99,6 +99,11 @@ services:
       TZ: ${TZ:-UTC}
       USER_GRPC_ADDR: ":9090"
       USER_METRICS_ADDR: ":9091"
+      EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
+      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE}
     depends_on:
       mysql:
         condition: service_healthy

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"ChatServer/apps/user/internal/handler"
@@ -38,6 +39,9 @@ func main() {
 	}
 	logger.ReplaceGlobal(zl)
 	defer zl.Sync()
+
+	// 1.2 初始化验证码邮件配置（授权码仅从环境变量读取，避免硬编码密钥）
+	initVerifyEmailConfig(ctx)
 
 	// 1.5 初始化 Async 协程池
 	async.SetContextPropagator(func(parent context.Context) context.Context {
@@ -237,4 +241,54 @@ func main() {
 		logger.String("grpc_address", opts.Address),
 		logger.String("metrics_address", metricsAddr),
 	)
+}
+
+func initVerifyEmailConfig(ctx context.Context) {
+	smtpHost := getEnv("EMAIL_SMTP_HOST", "smtp.qq.com")
+	smtpPort := getEnvInt("EMAIL_SMTP_PORT", 465)
+	senderName := getEnv("EMAIL_SENDER_NAME", "LCChat")
+	senderEmail := getEnv("EMAIL_SENDER", "2315635418@qq.com")
+	authCode := os.Getenv("EMAIL_AUTH_CODE")
+
+	util.SetEmailConfig(util.EmailConfig{
+		SMTPHost:     smtpHost,
+		SMTPPort:     smtpPort,
+		SenderEmail:  senderEmail,
+		SenderName:   senderName,
+		AuthPassword: authCode,
+	})
+
+	if authCode == "" {
+		logger.Warn(ctx, "验证码邮件授权码未配置，发送验证码将失败",
+			logger.String("env", "EMAIL_AUTH_CODE"),
+			logger.String("sender_email", senderEmail),
+		)
+		return
+	}
+
+	logger.Info(ctx, "验证码邮件配置已加载",
+		logger.String("smtp_host", smtpHost),
+		logger.Int("smtp_port", smtpPort),
+		logger.String("sender_email", senderEmail),
+	)
+}
+
+func getEnv(key, defaultValue string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	return v
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultValue
+	}
+	return n
 }

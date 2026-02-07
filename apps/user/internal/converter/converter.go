@@ -23,7 +23,7 @@ func ModelToProtoUserInfo(user *model.UserInfo) *pb.UserInfo {
 		Avatar:    user.Avatar,
 		Gender:    int32(user.Gender),
 		Signature: user.Signature,
-		Birthday:  user.Birthday,
+		Birthday:  formatBirthday(user.Birthday),
 		Status:    int32(user.Status),
 	}
 }
@@ -331,4 +331,11 @@ func TimePointerToMillis(t *time.Time) int64 {
 		return 0
 	}
 	return t.Unix() * 1000
+}
+
+func formatBirthday(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
 }

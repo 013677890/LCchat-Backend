@@ -35,3 +35,7 @@ third_party/
 # --- 前端文件 ---
 web/
 
+# --- 部署环境变量文件（保留示例，忽略真实密钥） ---
+deploy/env/chatserver.env
+deploy/env/*.local
+!deploy/env/chatserver.env.example
