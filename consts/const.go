@@ -212,6 +212,18 @@ const (
 	CodeCannotBlacklistSelf = 16005 // 不能拉黑自己
 )
 
+// Connect 模块错误 (17xxx)
+const (
+	// WebSocket 握手缺少 token
+	CodeConnectTokenRequired = 17001 // WebSocket 握手缺少 token
+	// WebSocket 握手缺少 device_id
+	CodeConnectDeviceIDRequired = 17002 // WebSocket 握手缺少 device_id
+	// WebSocket 上行消息格式错误
+	CodeConnectMessageFormatError = 17003 // WebSocket 上行消息格式错误
+	// WebSocket 上行消息类型不支持
+	CodeConnectMessageTypeNotSupport = 17004 // WebSocket 上行消息类型不支持
+)
+
 // 服务端错误 (3xxxx)
 const (
 	// 服务器内部错误
@@ -328,6 +340,12 @@ var CodeMessage = map[int]string{
 	CodeAlreadyInBlacklist:  "已在黑名单中",
 	CodeNotInBlacklist:      "不在黑名单中",
 	CodeCannotBlacklistSelf: "不能拉黑自己",
+
+	// Connect 模块
+	CodeConnectTokenRequired:         "缺少 token",
+	CodeConnectDeviceIDRequired:      "缺少 device_id",
+	CodeConnectMessageFormatError:    "消息格式错误",
+	CodeConnectMessageTypeNotSupport: "消息类型不支持",
 
 	// 服务端错误
 	CodeInternalError:      "服务器内部错误",

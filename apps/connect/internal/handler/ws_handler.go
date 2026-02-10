@@ -3,20 +3,17 @@ package handler
 import (
 	"ChatServer/apps/connect/internal/manager"
 	"ChatServer/apps/connect/internal/svc"
+	"ChatServer/consts"
 	"ChatServer/pkg/ctxmeta"
 	"ChatServer/pkg/logger"
+	"ChatServer/pkg/result"
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-)
-
-const (
-	// WebSocket 协议层业务错误码（仅用于 ws 帧内的 error 消息，不是 HTTP 状态码）。
-	wsMessageInvalidFormatCode = 10001
-	wsMessageUnsupportedCode   = 10002
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -123,7 +120,7 @@ func (h *WSHandler) handleConnection(ctx context.Context, conn *websocket.Conn, 
 func (h *WSHandler) handleMessage(ctx context.Context, client *manager.Client, session *svc.Session, raw []byte) {
 	envelope, err := h.connectSvc.ParseEnvelope(raw)
 	if err != nil {
-		h.sendErrorFrame(ctx, client, wsMessageInvalidFormatCode, "invalid frame format")
+		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageFormatError)
 		return
 	}
 
@@ -147,16 +144,16 @@ func (h *WSHandler) handleMessage(ctx context.Context, client *manager.Client, s
 			client.Close()
 		}
 	default:
-		h.sendErrorFrame(ctx, client, wsMessageUnsupportedCode, "unsupported message type")
+		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageTypeNotSupport)
 	}
 }
 
 // sendErrorFrame 发送 ws 协议层错误帧。
 // 发送失败通常表示连接不可写，此时主动关闭连接避免资源泄漏。
-func (h *WSHandler) sendErrorFrame(ctx context.Context, client *manager.Client, code int, message string) {
+func (h *WSHandler) sendErrorFrame(ctx context.Context, client *manager.Client, code int) {
 	payload, err := h.connectSvc.MarshalEnvelope("error", svc.ErrorData{
 		Code:    code,
-		Message: message,
+		Message: consts.GetMessage(code),
 	})
 	if err != nil {
 		logger.Warn(ctx, "错误帧序列化失败",
@@ -174,20 +171,25 @@ func (h *WSHandler) sendErrorFrame(ctx context.Context, client *manager.Client, 
 // 说明：握手前还未升级为 WebSocket，因此用 HTTP JSON 返回更直观。
 func (h *WSHandler) writeAuthError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, svc.ErrTokenRequired), errors.Is(err, svc.ErrDeviceIDRequired):
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    http.StatusBadRequest,
-			"message": err.Error(),
-		})
+	case errors.Is(err, svc.ErrTokenRequired):
+		h.writeHTTPError(c, http.StatusBadRequest, consts.CodeConnectTokenRequired)
+	case errors.Is(err, svc.ErrDeviceIDRequired):
+		h.writeHTTPError(c, http.StatusBadRequest, consts.CodeConnectDeviceIDRequired)
 	case errors.Is(err, svc.ErrTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    http.StatusUnauthorized,
-			"message": "token invalid or expired",
-		})
+		h.writeHTTPError(c, http.StatusUnauthorized, consts.CodeInvalidToken)
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    http.StatusInternalServerError,
-			"message": "internal error",
-		})
+		h.writeHTTPError(c, http.StatusInternalServerError, consts.CodeInternalError)
 	}
+}
+
+// writeHTTPError 按统一 Response 结构输出 HTTP 错误响应。
+func (h *WSHandler) writeHTTPError(c *gin.Context, httpStatus, code int) {
+	c.Set("business_code", code)
+	c.JSON(httpStatus, result.Response{
+		Code:      code,
+		Message:   consts.GetMessage(code),
+		Data:      nil,
+		TraceId:   c.GetString("trace_id"),
+		Timestamp: time.Now().Unix(),
+	})
 }
