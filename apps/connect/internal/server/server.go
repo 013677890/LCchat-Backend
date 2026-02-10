@@ -2,6 +2,7 @@ package server
 
 import (
 	"ChatServer/apps/connect/internal/handler"
+	"ChatServer/apps/connect/internal/middleware"
 	"ChatServer/pkg/util"
 	"context"
 	"net/http"
@@ -55,13 +56,18 @@ func New(cfg Config, wsHandler *handler.WSHandler) *Server {
 	gin.SetMode(ginMode)
 
 	r := gin.New()
-	r.Use(gin.Recovery())
 	r.Use(util.TraceLogger())
+	r.Use(middleware.ClientIPMiddleware())
+	r.Use(middleware.GinLogger())
+	r.Use(middleware.RecoverMiddleware(true))
+	r.Use(middleware.CORSMiddleware(middleware.DefaultCORSConfig()))
+
+	wsRateLimitCfg := middleware.DefaultWSHandshakeRateLimitConfig()
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/ws", wsHandler.ServeWS)
+	r.GET("/ws", middleware.WSHandshakeRateLimitMiddleware(wsRateLimitCfg), wsHandler.ServeWS)
 
 	return &Server{
 		httpServer: &http.Server{

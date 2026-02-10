@@ -53,7 +53,10 @@ func NewWSHandler(connManager *manager.ConnectionManager, connectSvc *svc.Connec
 func (h *WSHandler) ServeWS(c *gin.Context) {
 	token := c.Query("token")
 	deviceID := c.Query("device_id")
-	clientIP := c.ClientIP()
+	clientIP := ctxmeta.ClientIPFromGin(c)
+	if clientIP == "" {
+		clientIP = c.ClientIP()
+	}
 
 	session, err := h.connectSvc.Authenticate(c.Request.Context(), token, deviceID, clientIP)
 	if err != nil {
