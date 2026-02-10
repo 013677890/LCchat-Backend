@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package connect;
+
+option go_package = "ChatServer/apps/connect/pb";
+
+import "validate/validate.proto";
+
+// ConnectService 定义 connect 对内部服务暴露的 RPC 能力。
+// 使用场景：
+// 1. msg 服务将消息下发到在线连接；
+// 2. user 服务在“踢设备”后主动断开连接；
+// 3. 其他业务服务做系统通知/广播推送。
+service ConnectService {
+	// PushToDevice 向指定用户的指定设备投递消息。
+	// 典型场景：单设备回执、仅当前设备可见的安全提示。
+	rpc PushToDevice(PushToDeviceRequest) returns (PushToDeviceResponse);
+
+	// PushToUser 向用户所有在线设备广播。
+	// 典型场景：新消息多端同步、账号状态变更通知。
+	rpc PushToUser(PushToUserRequest) returns (PushToUserResponse);
+
+	// KickConnection 主动断开指定设备连接。
+	// 典型场景：用户在“设备管理”中踢掉某个历史设备。
+	rpc KickConnection(KickConnectionRequest) returns (KickConnectionResponse);
+}
+
+// MessageEnvelope 为 WebSocket 下行消息统一封装格式。
+// 建议业务层将真实 payload 放在 data 字段，type 用于客户端分发。
+message MessageEnvelope {
+	// type: 消息类型（如 message/notice/kickout）。
+	string type = 1 [(validate.rules).string = {min_len: 1, max_len: 64}];
+	// data: 业务负载（建议 JSON 编码后的 bytes）。
+	bytes data = 2;
+	// server_ts: 服务端生成时间戳（毫秒/秒由调用方约定一致）。
+	int64 server_ts = 3;
+	// trace_id: 链路追踪 ID，便于跨服务排障。
+	string trace_id = 4;
+}
+
+message PushToDeviceRequest {
+	// user_uuid: 目标用户 UUID。
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	// device_id: 目标设备 ID。
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+	// message: 待投递消息体。
+	MessageEnvelope message = 3 [(validate.rules).message.required = true];
+}
+
+message PushToDeviceResponse {
+	// delivered: true 表示目标连接存在且已成功入队。
+	bool delivered = 1;
+}
+
+message PushToUserRequest {
+	// user_uuid: 目标用户 UUID。
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	// message: 待广播消息体。
+	MessageEnvelope message = 2 [(validate.rules).message.required = true];
+}
+
+message PushToUserResponse {
+	// delivered_count: 成功入队的设备数量。
+	int32 delivered_count = 1;
+}
+
+message KickConnectionRequest {
+	// user_uuid: 目标用户 UUID。
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	// device_id: 目标设备 ID。
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+	// reason: 踢线原因，可用于客户端提示。
+	string reason = 3;
+}
+
+message KickConnectionResponse {
+	// success: true 表示目标连接存在且已断开；false 表示目标原本不在线。
+	bool success = 1;
+}
