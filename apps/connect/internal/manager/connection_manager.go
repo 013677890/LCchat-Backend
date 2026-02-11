@@ -4,6 +4,7 @@ import (
 	"hash/fnv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -169,7 +170,12 @@ func (m *ConnectionManager) Count() int {
 }
 
 // Shutdown 关闭全部连接并阻止后续注册。
-// 用于进程优雅退出阶段，确保不再接收新连接并尽快释放资源。
+// 关闭流程：
+// 1. 标记 shutdown 状态，阻止新连接注册；
+// 2. 收集所有在线连接并从索引中移除；
+// 3. 向所有连接发送 CloseGoingAway 帧，通知客户端服务端正在维护；
+// 4. 等待 1 秒让客户端处理关闭帧；
+// 5. 强制关闭仍未断开的连接。
 func (m *ConnectionManager) Shutdown() {
 	if !m.shutdown.CompareAndSwap(false, true) {
 		return
@@ -187,6 +193,14 @@ func (m *ConnectionManager) Shutdown() {
 		b.byUser = make(map[string]map[string]*Client)
 		b.mu.Unlock()
 	}
+
+	// 先发送 CloseGoingAway 帧，让客户端感知到优雅关闭。
+	for _, client := range clients {
+		client.CloseGracefully()
+	}
+
+	// 等待 1 秒让客户端完成关闭握手，再强制断开残余连接。
+	time.Sleep(1 * time.Second)
 
 	for _, client := range clients {
 		client.Close()

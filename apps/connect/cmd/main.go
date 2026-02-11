@@ -61,7 +61,7 @@ func main() {
 
 	// 4) 构建 HTTP 服务（包含 /health 与 /ws）。
 	srvCfg := server.DefaultConfig()
-	srv := server.New(srvCfg, wsHandler)
+	srv := server.New(srvCfg, wsHandler, connManager)
 
 	// 5) 后台启动 HTTP 监听。
 	// ListenAndServe 的正常退出会返回 http.ErrServerClosed，这种情况不视为启动失败。

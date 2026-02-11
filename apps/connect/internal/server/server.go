@@ -2,9 +2,11 @@ package server
 
 import (
 	"ChatServer/apps/connect/internal/handler"
+	"ChatServer/apps/connect/internal/manager"
 	"ChatServer/apps/connect/internal/middleware"
 	"ChatServer/pkg/util"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -46,9 +48,10 @@ type Server struct {
 
 // New 构建 Gin 路由并包装成 HTTP Server。
 // 路由职责：
-// - GET /health: 健康检查，供容器/探针调用。
-// - GET /ws:     WebSocket 接入入口。
-func New(cfg Config, wsHandler *handler.WSHandler) *Server {
+// - GET /health:   健康检查，返回在线连接数，供容器/探针调用。
+// - GET /metrics:  暴露 Prometheus 文本格式指标（online_connections gauge）。
+// - GET /ws:       WebSocket 接入入口。
+func New(cfg Config, wsHandler *handler.WSHandler, connManager *manager.ConnectionManager) *Server {
 	ginMode := os.Getenv("GIN_MODE")
 	if ginMode == "" {
 		ginMode = gin.ReleaseMode
@@ -65,8 +68,20 @@ func New(cfg Config, wsHandler *handler.WSHandler) *Server {
 	wsRateLimitCfg := middleware.DefaultWSHandshakeRateLimitConfig()
 
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":             "ok",
+			"online_connections": connManager.Count(),
+		})
 	})
+
+	r.GET("/metrics", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		c.String(http.StatusOK,
+			fmt.Sprintf("# HELP connect_online_connections Current number of active WebSocket connections.\n"+
+				"# TYPE connect_online_connections gauge\n"+
+				"connect_online_connections %d\n", connManager.Count()))
+	})
+
 	r.GET("/ws", middleware.WSHandshakeRateLimitMiddleware(wsRateLimitCfg), wsHandler.ServeWS)
 
 	return &Server{

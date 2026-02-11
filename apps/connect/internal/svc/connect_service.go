@@ -1,7 +1,7 @@
 package svc
 
 import (
-	"ChatServer/consts/redisKey"
+	rediskey "ChatServer/consts/redisKey"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/util"
 	"context"
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -47,10 +48,18 @@ type ErrorData struct {
 	Message string `json:"message"`
 }
 
+const (
+	// activeThrottleInterval 心跳活跃时间写 Redis 的最小间隔。
+	// 在该窗口内的重复心跳只更新本地缓存，不触发 Redis 写入，
+	// 以降低高频心跳对 Redis 的写压力。
+	activeThrottleInterval = 5 * time.Minute
+)
+
 // ConnectService 承载 connect 的核心业务逻辑。
 // 说明：当前只依赖 Redis，后续会补充 user/msg gRPC 客户端。
 type ConnectService struct {
-	redisClient *redis.Client
+	redisClient    *redis.Client
+	activeThrottle sync.Map // key: "userUUID:deviceID" → value: int64(上次写 Redis 的 unix 秒)
 }
 
 // NewConnectService 创建业务服务实例。
@@ -119,25 +128,27 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 
 // OnConnect 在连接建立后触发。
 // 当前行为：
-// - 立即写入设备活跃时间（用于在线状态判定）；
+// - 立即写入设备活跃时间（用于在线状态判定），不受节流限制；
 // 后续会扩展：
 // - 调 user 内部 RPC 将设备状态置为在线。
 func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
-	s.touchActive(ctx, session.UserUUID, session.DeviceID)
+	s.touchActive(ctx, session.UserUUID, session.DeviceID, true)
 	// TODO: 调用 user-service 内部 RPC，将设备状态更新为在线。
 }
 
 // OnHeartbeat 在收到客户端心跳后触发。
-// 目前仅更新活跃时间，后续可叠加风控与统计逻辑。
+// 受 5 分钟本地节流保护：窗口内的重复心跳不会触发 Redis 写入。
 func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
-	s.touchActive(ctx, session.UserUUID, session.DeviceID)
+	s.touchActive(ctx, session.UserUUID, session.DeviceID, false)
 }
 
 // OnDisconnect 在连接断开后触发。
+// 清理本地节流缓存，避免内存泄漏。
 // 后续会调用 user 内部 RPC，将设备状态更新为离线。
 func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
+	throttleKey := session.UserUUID + ":" + session.DeviceID
+	s.activeThrottle.Delete(throttleKey)
 	// TODO: 调用 user-service 内部 RPC，将设备状态更新为离线。
-	_ = session
 }
 
 // ParseEnvelope 解析客户端上行帧。
@@ -172,14 +183,27 @@ func (s *ConnectService) MarshalEnvelope(msgType string, data any) ([]byte, erro
 // - field: device_id
 // - value: unix 秒
 //
-// 额外行为：每次写入都会续期 key 的 TTL，确保活跃设备不会被过早淘汰。
-func (s *ConnectService) touchActive(ctx context.Context, userUUID, deviceID string) {
+// 节流策略：
+// - force=true 时立即写入（用于 OnConnect 等必须即时生效的场景）；
+// - force=false 时，若距上次写入不足 activeThrottleInterval（5 分钟），则跳过。
+func (s *ConnectService) touchActive(ctx context.Context, userUUID, deviceID string, force bool) {
 	if s.redisClient == nil || userUUID == "" || deviceID == "" {
 		return
 	}
 
+	now := time.Now()
+	throttleKey := userUUID + ":" + deviceID
+
+	if !force {
+		if last, ok := s.activeThrottle.Load(throttleKey); ok {
+			if now.Sub(time.Unix(last.(int64), 0)) < activeThrottleInterval {
+				return
+			}
+		}
+	}
+
 	key := rediskey.DeviceActiveKey(userUUID)
-	ts := time.Now().Unix()
+	ts := now.Unix()
 	pipe := s.redisClient.Pipeline()
 	pipe.HSet(ctx, key, deviceID, ts)
 	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
@@ -190,7 +214,10 @@ func (s *ConnectService) touchActive(ctx context.Context, userUUID, deviceID str
 			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
+		return
 	}
+
+	s.activeThrottle.Store(throttleKey, ts)
 }
 
 // md5Hex 返回字符串的 MD5 十六进制摘要。

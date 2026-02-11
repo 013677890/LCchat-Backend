@@ -123,6 +123,16 @@ func (c *Client) Close() {
 	})
 }
 
+// CloseGracefully 先向客户端发送 CloseGoingAway 帧，再关闭连接。
+// 用于优雅停机场景：客户端收到 GoingAway 后知道服务端正在维护，
+// 可立即尝试重连到其他节点，而不是当作异常断线处理。
+func (c *Client) CloseGracefully() {
+	deadline := time.Now().Add(wsWriteTimeout)
+	msg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")
+	_ = c.conn.WriteControl(websocket.CloseMessage, msg, deadline)
+	c.Close()
+}
+
 // readLoop 持续读取客户端上行帧并交由 onMessage 处理。
 // 注意：ReadMessage 是阻塞调用，不使用 select 轮询 ctx/done。
 // 退出依赖连接关闭（Close）或网络读错误。
