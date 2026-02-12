@@ -169,6 +169,52 @@ func (m *ConnectionManager) Count() int {
 	return total
 }
 
+// GetOnlineDevices 返回指定用户当前在线的设备 ID 列表。
+// 如果用户完全离线，返回空切片。
+func (m *ConnectionManager) GetOnlineDevices(userUUID string) []string {
+	userBucket := m.userBucketFor(userUUID)
+
+	userBucket.mu.RLock()
+	defer userBucket.mu.RUnlock()
+
+	userConns, ok := userBucket.byUser[userUUID]
+	if !ok || len(userConns) == 0 {
+		return nil
+	}
+
+	devices := make([]string, 0, len(userConns))
+	for deviceID := range userConns {
+		devices = append(devices, deviceID)
+	}
+	return devices
+}
+
+// KickDevice 强制断开指定用户的指定设备连接。
+// 返回 true 表示连接存在且已被关闭；false 表示目标不在线。
+func (m *ConnectionManager) KickDevice(userUUID, deviceID string) bool {
+	userBucket := m.userBucketFor(userUUID)
+
+	userBucket.mu.Lock()
+	userConns, ok := userBucket.byUser[userUUID]
+	if !ok {
+		userBucket.mu.Unlock()
+		return false
+	}
+	client, ok := userConns[deviceID]
+	if !ok {
+		userBucket.mu.Unlock()
+		return false
+	}
+	delete(userConns, deviceID)
+	if len(userConns) == 0 {
+		delete(userBucket.byUser, userUUID)
+	}
+	userBucket.mu.Unlock()
+
+	client.CloseGracefully()
+	return true
+}
+
 // Shutdown 关闭全部连接并阻止后续注册。
 // 关闭流程：
 // 1. 标记 shutdown 状态，阻止新连接注册；

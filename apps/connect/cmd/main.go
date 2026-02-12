@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ChatServer/apps/connect/internal/grpc"
 	"ChatServer/apps/connect/internal/handler"
 	"ChatServer/apps/connect/internal/manager"
 	"ChatServer/apps/connect/internal/server"
@@ -59,35 +60,58 @@ func main() {
 	connectSvc := svc.NewConnectService(redisClient)
 	wsHandler := handler.NewWSHandler(connManager, connectSvc)
 
-	// 4) 构建 HTTP 服务（包含 /health 与 /ws）。
+	// 4) 构建 HTTP 服务（包含 /health、/metrics 与 /ws）。
 	srvCfg := server.DefaultConfig()
 	srv := server.New(srvCfg, wsHandler, connManager)
 
-	// 5) 后台启动 HTTP 监听。
+	// 5) 构建 gRPC 服务。
+	// gRPC 监听独立端口，提供 PushToDevice/PushToUser/BroadcastToUsers/
+	// KickConnection/GetOnlineStatus/BatchGetOnlineStatus。
+	grpcAddr := os.Getenv("CONNECT_GRPC_ADDR")
+	if grpcAddr == "" {
+		grpcAddr = ":9091"
+	}
+	grpcSrv := grpc.NewServer(grpcAddr, connManager)
+
+	// 6) 后台启动 HTTP 监听。
 	// ListenAndServe 的正常退出会返回 http.ErrServerClosed，这种情况不视为启动失败。
 	go func() {
-		logger.Info(ctx, "Connect 服务启动中",
+		logger.Info(ctx, "Connect HTTP 服务启动中",
 			logger.String("addr", srvCfg.Addr),
 		)
 		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
-			logger.Error(ctx, "Connect 服务启动失败",
+			logger.Error(ctx, "Connect HTTP 服务启动失败",
 				logger.ErrorField("error", err),
 			)
 		}
 	}()
 
-	// 6) 阻塞等待系统退出信号（Ctrl+C / SIGTERM）。
+	// 7) 后台启动 gRPC 监听。
+	go func() {
+		logger.Info(ctx, "Connect gRPC 服务启动中",
+			logger.String("addr", grpcAddr),
+		)
+		if err := grpcSrv.Start(); err != nil {
+			logger.Error(ctx, "Connect gRPC 服务启动失败",
+				logger.ErrorField("error", err),
+			)
+		}
+	}()
+
+	// 8) 阻塞等待系统退出信号（Ctrl+C / SIGTERM）。
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// 7) 优雅关闭流程：
-	// - 先关闭连接管理器，主动断开所有 WebSocket 连接，避免悬挂连接。
-	// - 再关闭 HTTP 服务，等待进行中的请求在超时时间内结束。
+	// 9) 优雅关闭流程：
+	// - 先停 gRPC（不再接受新的 RPC 调用）。
+	// - 再关闭连接管理器，主动断开所有 WebSocket 连接，避免悬挂连接。
+	// - 最后关闭 HTTP 服务，等待进行中的请求在超时时间内结束。
 	logger.Info(ctx, "Connect 服务开始优雅停机")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	grpcSrv.Stop()
 	connManager.Shutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error(ctx, "Connect 服务优雅停机失败",
