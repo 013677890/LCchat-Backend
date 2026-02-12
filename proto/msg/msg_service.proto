@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package msg;
+
+option go_package = "ChatServer/apps/msg/pb";
+
+import "validate/validate.proto";
+import "pb/msg/msg_common.proto";
+
+// MsgService 定义消息服务对外暴露的 RPC 能力。
+// 调用方：Gateway（HTTP → gRPC 转发）、Connect（Kafka 消费后回查）等。
+service MsgService {
+  // ==================== 消息发送 ====================
+
+  // SendMessage 发送一条消息（单聊/群聊统一入口）。
+  // 幂等保证：同一 (from_uuid, device_id, client_msg_id) 不会重复持久化。
+  // 内部流程：校验 → 幂等检查 → 持久化 → 分配 seq → 写 Kafka → 返回。
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+
+  // ==================== 消息拉取 ====================
+
+  // PullMessages 按会话增量拉取历史消息（基于 seq）。
+  // 客户端记录锚点 seq，按方向拉取前后消息。
+  rpc PullMessages(PullMessagesRequest) returns (PullMessagesResponse);
+
+  // GetMessagesByIds 批量获取指定消息。
+  // 典型场景：
+  // - 用户点击引用/回复区域，需要跳转到原始消息；
+  // - 推送通知只携带 msg_id，客户端需要反查详情。
+  rpc GetMessagesByIds(GetMessagesByIdsRequest) returns (GetMessagesByIdsResponse);
+
+  // ==================== 消息操作 ====================
+
+  // RecallMessage 撤回一条消息。
+  // 限制：仅发送者或群管理员可撤回，且必须在发送后 2 分钟内。
+  // 撤回后 status 置为 1，content 被改写为系统提示 JSON（含 operator），
+  // 同时对所有在线终端推送撤回通知。
+  rpc RecallMessage(RecallMessageRequest) returns (RecallMessageResponse);
+
+  // ==================== 会话管理 ====================
+
+  // GetConversations 获取用户的会话列表。
+  // 支持两种模式：
+  // - 全量：首次登录，拉取所有活跃会话（按 updated_at 倒序分页）；
+  // - 增量：传入 updated_since，只返回该时间点之后有变更的会话。
+  rpc GetConversations(GetConversationsRequest) returns (GetConversationsResponse);
+
+  // MarkRead 标记会话已读（基于已读位点 read_seq）。
+  // 多端同步：服务端更新 read_seq 后，会向该用户其他在线设备推送 MarkRead 通知，
+  // 各端据此同步清除红点。
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+
+  // DeleteConversation 删除（关闭）会话。
+  // 逻辑删除：status 置为 1，不影响消息数据。
+  rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse);
+
+  // UpdateConversationSettings 更新会话设置（免打扰/置顶）。
+  rpc UpdateConversationSettings(UpdateConvSettingsRequest) returns (UpdateConvSettingsResponse);
+}
+
+// ==================== 消息发送 ====================
+
+message SendMessageRequest {
+  // from_uuid: 发送者 UUID（从 JWT 中提取，Gateway 填充）。
+  string from_uuid = 1 [(validate.rules).string.min_len = 1];
+  // device_id: 发送设备 ID（用于幂等三元组）。
+  string device_id = 2 [(validate.rules).string.min_len = 1];
+  // conv_type: 会话类型。defined_only 防止传入未定义的枚举值。
+  ConvType conv_type = 3 [(validate.rules).enum = {defined_only: true, not_in: [0]}];
+  // target_uuid: 单聊为对端 UUID，群聊为群 UUID。
+  string target_uuid = 4 [(validate.rules).string.min_len = 1];
+  // client_msg_id: 客户端生成的幂等 ID（建议 UUID），用于去重。
+  string client_msg_id = 5 [(validate.rules).string = {min_len: 1, max_len: 64}];
+  // msg_type: 消息类型代号。
+  int32 msg_type = 6;
+  // content: 消息内容（JSON 字符串）。
+  string content = 7 [(validate.rules).string = {min_len: 1, max_len: 65536}];
+  // reply_to_msg_id: 引用/回复的目标消息 ID（空字符串表示非回复消息）。
+  // 服务端会在落库时将此 ID 写入 MsgItem，客户端可据此渲染"回复 xxx:"。
+  string reply_to_msg_id = 8;
+  // at_users: 被 @ 的用户 UUID 列表。
+  // 服务端会根据此字段调整推送通知的文案和角标提醒强度。
+  // @All 约定使用特殊 UUID "00000000000000000000"。
+  repeated string at_users = 9;
+}
+
+message SendMessageResponse {
+  // msg_id: 服务端分配的全局消息 ID。
+  string msg_id = 1;
+  // seq: 服务端分配的会话内序号。
+  int64 seq = 2;
+  // conv_id: 会话 ID（首次发消息时由服务端创建）。
+  string conv_id = 3;
+  // send_time: 服务端发送时间（unix 毫秒）。
+  int64 send_time = 4;
+}
+
+// ==================== 消息拉取 ====================
+
+message PullMessagesRequest {
+  // conv_id: 目标会话 ID。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // anchor_seq: 以此 seq 为锚点进行拉取。
+  // direction=FORWARD:  拉取 seq > anchor_seq 的消息（新消息）。
+  // direction=BACKWARD: 拉取 seq < anchor_seq 的消息（历史记录）。
+  // 传 0 时：FORWARD 从最早开始，BACKWARD 从最新开始。
+  int64 anchor_seq = 2;
+  // limit: 单次最多拉取条数，默认 50，上限 200。
+  int32 limit = 3 [(validate.rules).int32 = {gte: 0, lte: 200}];
+  // direction: 拉取方向。
+  PullDirection direction = 4;
+}
+
+enum PullDirection {
+  PULL_DIRECTION_UNSPECIFIED = 0; // 默认：等同 FORWARD（向后拉取新消息）
+  PULL_DIRECTION_FORWARD    = 1; // 向后：seq > anchor_seq
+  PULL_DIRECTION_BACKWARD   = 2; // 向前：seq < anchor_seq（加载更早的历史）
+}
+
+message PullMessagesResponse {
+  // messages: 拉取到的消息列表（按 seq 升序）。
+  repeated MsgItem messages = 1;
+  // has_more: 是否还有更多消息可拉取。
+  bool has_more = 2;
+  // max_seq: 该会话当前最大 seq（客户端可用于判断是否有 gap）。
+  int64 max_seq = 3;
+}
+
+// ==================== 消息反查 ====================
+
+message GetMessagesByIdsRequest {
+  // conv_id: 会话 ID（用于定位分表/索引）。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // msg_ids: 要查询的消息 ID 列表，单次上限 50。
+  repeated string msg_ids = 2 [(validate.rules).repeated = {min_items: 1, max_items: 50}];
+}
+
+message GetMessagesByIdsResponse {
+  // messages: 查到的消息列表（顺序不保证）。
+  // 找不到的 msg_id 会被静默跳过，不会报错。
+  repeated MsgItem messages = 1;
+}
+
+// ==================== 消息撤回 ====================
+
+message RecallMessageRequest {
+  // conv_id: 会话 ID。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // msg_id: 要撤回的消息 ID。
+  string msg_id = 2 [(validate.rules).string.min_len = 1];
+  // operator_uuid: 撤回操作者 UUID（从 JWT 中提取）。
+  // 可能是消息发送者本人，也可能是群管理员。
+  string operator_uuid = 3 [(validate.rules).string.min_len = 1];
+}
+
+message RecallMessageResponse {}
+
+// ==================== 会话列表 ====================
+
+message GetConversationsRequest {
+  // owner_uuid: 会话归属用户 UUID（从 JWT 中提取）。
+  string owner_uuid = 1 [(validate.rules).string.min_len = 1];
+  // updated_since: 增量同步起始时间（unix 毫秒），传 0 表示全量拉取。
+  int64 updated_since = 2;
+  // page_size: 分页大小，默认 50，上限 200。
+  int32 page_size = 3 [(validate.rules).int32 = {gte: 0, lte: 200}];
+  // cursor: 分页游标（上一页最后一条的 updated_at 值），首页传 0。
+  int64 cursor = 4;
+}
+
+message GetConversationsResponse {
+  // conversations: 会话列表（按 updated_at 倒序）。
+  repeated ConversationItem conversations = 1;
+  // has_more: 是否还有更多会话。
+  bool has_more = 2;
+  // next_cursor: 下一页游标。
+  int64 next_cursor = 3;
+}
+
+// ==================== 会话操作 ====================
+
+message MarkReadRequest {
+  // conv_id: 会话 ID。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // owner_uuid: 会话归属用户 UUID。
+  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+  // read_seq: 必填。客户端当前已读到的最大 seq。
+  // 服务端逻辑：
+  // 1. 更新该用户的 read_seq = max(DB.read_seq, req.read_seq)；
+  // 2. 计算 unread_count = conv.max_seq - read_seq；
+  // 3. 推送 MarkRead 通知给该用户的其他在线设备，Payload 包含新的 read_seq。
+  int64 read_seq = 3 [(validate.rules).int64.gt = 0];
+}
+
+message MarkReadResponse {
+  // unread_count: 标记后的剩余未读数（通常为 0）。
+  int32 unread_count = 1;
+}
+
+message DeleteConversationRequest {
+  // conv_id: 会话 ID。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // owner_uuid: 会话归属用户 UUID。
+  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+}
+
+message DeleteConversationResponse {}
+
+message UpdateConvSettingsRequest {
+  // conv_id: 会话 ID。
+  string conv_id = 1 [(validate.rules).string.min_len = 1];
+  // owner_uuid: 会话归属用户 UUID。
+  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+  // 以下字段使用 optional 语义：只更新传入的字段，未传入的保持不变。
+  // mute: 免打扰开关。
+  optional bool mute = 3;
+  // pin: 置顶开关。
+  optional bool pin = 4;
+}
+
+message UpdateConvSettingsResponse {}

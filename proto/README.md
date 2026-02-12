@@ -5,9 +5,11 @@
 - Proto 源文件统一放在仓库根目录 `pb/` 下：
   - `pb/user/*.proto`
   - `pb/connect/connect.proto`
+  - `pb/msg/*.proto`
 - 生成代码仍输出到原目录：
   - `apps/user/pb/*.pb.go`
   - `apps/connect/pb/*.pb.go`
+  - `apps/msg/pb/*.pb.go`
 
 ## 2. 前置依赖
 
@@ -37,7 +39,9 @@ protoc `
   pb/user/device_service.proto `
   pb/user/friend_service.proto `
   pb/user/blacklist_service.proto `
-  pb/connect/connect.proto
+  pb/connect/connect.proto `
+  pb/msg/msg_common.proto `
+  pb/msg/msg_service.proto
 ```
 
 说明：
@@ -60,7 +64,9 @@ protoc `
   pb/user/device_service.proto `
   pb/user/friend_service.proto `
   pb/user/blacklist_service.proto `
-  pb/connect/connect.proto
+  pb/connect/connect.proto `
+  pb/msg/msg_common.proto `
+  pb/msg/msg_service.proto
 ```
 
 如果你的 `protoc-gen-validate` 版本不支持 `module` 参数，请按你本地插件版本文档调整参数。
@@ -86,7 +92,9 @@ protoc \
   pb/user/device_service.proto \
   pb/user/friend_service.proto \
   pb/user/blacklist_service.proto \
-  pb/connect/connect.proto
+  pb/connect/connect.proto \
+  pb/msg/msg_common.proto \
+  pb/msg/msg_service.proto
 ```
 
 ### 5.2 生成 validate 代码（可选）
@@ -104,5 +112,7 @@ protoc \
   pb/user/device_service.proto \
   pb/user/friend_service.proto \
   pb/user/blacklist_service.proto \
-  pb/connect/connect.proto
+  pb/connect/connect.proto \
+  pb/msg/msg_common.proto \
+  pb/msg/msg_service.proto
 ```

@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package msg;
+
+option go_package = "ChatServer/apps/msg/pb";
+
+import "validate/validate.proto";
+
+// ==================== 通用数据模型 ====================
+
+// ConvType 会话类型。
+enum ConvType {
+  CONV_TYPE_UNSPECIFIED = 0;
+  CONV_TYPE_P2P         = 1; // 单聊
+  CONV_TYPE_GROUP       = 2; // 群聊
+}
+
+// MsgItem 单条消息完整结构，用于拉取历史、下行推送等场景。
+// 字段与 model.Message 一一映射。
+//
+// 撤回约定（status=1）：
+//   当消息被撤回时，content 字段会被服务端改写为系统提示 JSON，格式示例：
+//   {"text": "张三撤回了一条消息", "operator": "uuid-xxx"}
+//   客户端应按 status 判断是否渲染为撤回样式，operator 字段标识撤回操作者
+//   （可能是发送者本人，也可能是群管理员）。
+message MsgItem {
+  // msg_id: 全局唯一消息 ID（服务端生成，ULID/雪花）。
+  string msg_id = 1;
+  // client_msg_id: 客户端幂等 ID，用于去重。
+  string client_msg_id = 2;
+  // conv_id: 会话 ID（如 p2p-<sorted_uuids> 或 group_uuid）。
+  string conv_id = 3;
+  // seq: 会话内严格递增序号，由服务端分配。
+  int64 seq = 4;
+  // from_uuid: 发送者 UUID（系统消息也使用保留账号）。
+  string from_uuid = 5;
+  // msg_type: 消息类型代号（0-99 普通消息，100+ 系统/控制消息）。
+  int32 msg_type = 6;
+  // content: 消息内容（JSON 字符串，客户端按 msg_type 解析）。
+  string content = 7;
+  // status: 消息状态，0=正常 1=撤回 2=删除。
+  int32 status = 8;
+  // send_time: 发送时间（服务端时间，unix 毫秒）。
+  int64 send_time = 9;
+  // reply_to_msg_id: 引用/回复的目标消息 ID（空字符串表示非回复消息）。
+  string reply_to_msg_id = 10;
+  // at_users: 被 @ 的用户 UUID 列表。@All 使用特殊 UUID "00000000000000000000"。
+  repeated string at_users = 11;
+}
+
+// ConversationItem 会话列表项，对应 model.Conversation 视图。
+message ConversationItem {
+  // conv_id: 会话 ID。
+  string conv_id = 1;
+  // conv_type: 会话类型。
+  ConvType conv_type = 2;
+  // target_uuid: 单聊为对端 UUID，群聊为群 UUID。
+  string target_uuid = 3;
+  // last_msg: 最后一条消息摘要（可能为空，如新会话）。
+  MsgItem last_msg = 4;
+  // unread_count: 未读消息数。
+  int32 unread_count = 5;
+  // mute: 是否免打扰。
+  bool mute = 6;
+  // pin: 是否置顶。
+  bool pin = 7;
+  // updated_at: 会话最后更新时间（unix 毫秒），用于增量同步排序。
+  int64 updated_at = 8;
+  // last_msg_sender_name: 最后一条消息发送者昵称快照。
+  // 用于会话列表快速展示，不保证实时最新（用户改名后不会回刷历史快照）。
+  string last_msg_sender_name = 9;
+  // last_msg_sender_avatar: 最后一条消息发送者头像快照。
+  string last_msg_sender_avatar = 10;
+}
