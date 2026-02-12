@@ -1,4 +1,4 @@
-package interceptors
+package grpcx
 
 import (
 	"ChatServer/pkg/ctxmeta"
@@ -8,7 +8,8 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// MetadataUnaryInterceptor 将 gRPC metadata 注入到 context 中
+// MetadataUnaryInterceptor 将 gRPC incoming metadata 注入到 context 中，
+// 使下游业务代码可通过 ctxmeta 包统一读取 trace_id / user_uuid / device_id / client_ip。
 func MetadataUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if md, ok := metadata.FromIncomingContext(ctx); ok {

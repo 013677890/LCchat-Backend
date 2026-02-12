@@ -3,10 +3,12 @@ package grpc
 import (
 	"ChatServer/apps/connect/internal/manager"
 	"ChatServer/apps/connect/pb"
+	"ChatServer/pkg/grpcx"
 	"ChatServer/pkg/logger"
 	"context"
 	"net"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -22,14 +24,35 @@ type Server struct {
 }
 
 // NewServer 创建 connect gRPC Server。
-// addr 示例：":9090"。
+// addr 示例：":9091"。
 func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
 	s := &Server{
 		connManager: connManager,
 		addr:        addr,
 	}
 
-	grpcServer := grpc.NewServer()
+	// 构建拦截器链：Recovery → Metadata → RateLimit → Metrics → Logging
+	// connect 的 RPS 阈值高于 user 服务（大量推送调用）。
+	rateLimitCfg := grpcx.RateLimitConfig{
+		RequestsPerSecond: 5000,
+		Burst:             8000,
+	}
+	metrics := grpcx.NewMetrics(grpcx.MetricsConfig{Namespace: "connect"})
+
+	unaryInters := []grpc.UnaryServerInterceptor{
+		grpcx.RecoveryUnaryInterceptor(),
+		grpcx.MetadataUnaryInterceptor(),
+		grpcx.RateLimitUnaryInterceptor(rateLimitCfg),
+		metrics.UnaryInterceptor(),
+		grpcx.LoggingUnaryInterceptor(grpcx.LoggingConfig{
+			SlowThreshold: 200 * time.Millisecond, // 推送类 RPC 要求更低延迟
+			IgnoreMethods: []string{"/grpc.health.v1.Health/Check"},
+		}),
+	}
+
+	grpcServer := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(unaryInters...),
+	)
 	pb.RegisterConnectServiceServer(grpcServer, s)
 
 	// 开发/调试阶段开启反射，方便 grpcurl 等工具调用。

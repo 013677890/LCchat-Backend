@@ -9,15 +9,14 @@ import (
 	"time"
 
 	"ChatServer/apps/user/internal/handler"
-	"ChatServer/apps/user/internal/interceptors"
 	"ChatServer/apps/user/internal/repository"
-	"ChatServer/apps/user/internal/server"
 	"ChatServer/apps/user/internal/service"
 	"ChatServer/apps/user/mq"
 	userpb "ChatServer/apps/user/pb"
 	"ChatServer/config"
 	"ChatServer/pkg/async"
 	"ChatServer/pkg/ctxmeta"
+	"ChatServer/pkg/grpcx"
 	"ChatServer/pkg/kafka"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/mysql"
@@ -164,47 +163,10 @@ func main() {
 	// 8. 初始化小组件
 	util.InitSnowflake(1) // 雪花算法
 
-	// 9. 启动 gRPC Server
-	grpcAddr := os.Getenv("USER_GRPC_ADDR")
-	if grpcAddr == "" {
-		grpcAddr = ":9090"
-	}
-
-	opts := server.Options{
-		Address:          grpcAddr,
-		EnableHealth:     true,
-		EnableReflection: true, // 生产环境建议关闭
-	}
-
-	logger.Info(ctx, "准备启动用户服务", logger.String("address", opts.Address))
-
-	if err := server.Start(ctx, opts, func(s *grpc.Server, hs healthgrpc.HealthServer) {
-		// 注册认证服务
-		userpb.RegisterAuthServiceServer(s, authHandler)
-		// 注册用户服务
-		userpb.RegisterUserServiceServer(s, userHandler)
-		// 注册好友服务
-		userpb.RegisterFriendServiceServer(s, friendHandler)
-		// 注册黑名单服务
-		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
-		// 注册设备服务
-		userpb.RegisterDeviceServiceServer(s, deviceHandler)
-
-		// 设置健康检查状态
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(service string, status healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
-		}
-	}); err != nil {
-		log.Fatalf("启动gRPC服务失败: %v", err)
-	}
-
-	// 10. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
+	// 9. 启动 Metrics HTTP Server（暴露 Prometheus 指标）。
+	// 注意：必须在 grpcx.Start 之前启动，因为 Start 是阻塞调用。
 	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", interceptors.GetMetricsHandler())
+	metricsMux.Handle("/metrics", grpcx.DefaultHandler())
 
 	metricsAddr := os.Getenv("USER_METRICS_ADDR")
 	if metricsAddr == "" {
@@ -222,10 +184,41 @@ func main() {
 		}
 	}()
 
-	logger.Info(ctx, "User 服务启动成功",
-		logger.String("grpc_address", opts.Address),
+	// 10. 启动 gRPC Server（阻塞直到服务停止）。
+	grpcAddr := os.Getenv("USER_GRPC_ADDR")
+	if grpcAddr == "" {
+		grpcAddr = ":9090"
+	}
+
+	opts := grpcx.ServerOptions{
+		Address:          grpcAddr,
+		Namespace:        "user",
+		EnableHealth:     true,
+		EnableReflection: true, // 生产环境建议关闭
+	}
+
+	logger.Info(ctx, "User 服务启动中",
+		logger.String("grpc_address", grpcAddr),
 		logger.String("metrics_address", metricsAddr),
 	)
+
+	if _, err := grpcx.Start(ctx, opts, func(s *grpc.Server, hs healthgrpc.HealthServer) {
+		userpb.RegisterAuthServiceServer(s, authHandler)
+		userpb.RegisterUserServiceServer(s, userHandler)
+		userpb.RegisterFriendServiceServer(s, friendHandler)
+		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
+		userpb.RegisterDeviceServiceServer(s, deviceHandler)
+
+		if hs != nil {
+			if setter, ok := hs.(interface {
+				SetServingStatus(service string, status healthgrpc.HealthCheckResponse_ServingStatus)
+			}); ok {
+				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
+			}
+		}
+	}); err != nil {
+		log.Fatalf("启动gRPC服务失败: %v", err)
+	}
 }
 
 func initVerifyEmailConfig(ctx context.Context) {

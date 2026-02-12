@@ -1,4 +1,4 @@
-package interceptors
+package grpcx
 
 import (
 	"context"
@@ -10,7 +10,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// RecoveryUnaryInterceptor 捕获 panic，避免进程崩溃。
+// RecoveryUnaryInterceptor 捕获 handler 内的 panic，避免单个请求的异常崩溃整个进程。
+// 捕获后记录 Error 日志（含 method + panic 值），并返回 codes.Internal。
 func RecoveryUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
