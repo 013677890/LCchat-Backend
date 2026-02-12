@@ -4,8 +4,6 @@ package msg;
 
 option go_package = "ChatServer/apps/msg/pb";
 
-import "validate/validate.proto";
-
 // ==================== 通用数据模型 ====================
 
 // ConvType 会话类型。

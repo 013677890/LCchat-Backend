@@ -5,7 +5,7 @@ package msg;
 option go_package = "ChatServer/apps/msg/pb";
 
 import "validate/validate.proto";
-import "pb/msg/msg_common.proto";
+import "proto/msg/msg_common.proto";
 
 // MsgService 定义消息服务对外暴露的 RPC 能力。
 // 调用方：Gateway（HTTP → gRPC 转发）、Connect（Kafka 消费后回查）等。
