@@ -622,3 +622,124 @@ func TestUserDeviceServiceBatchGetOnlineStatus(t *testing.T) {
 		assert.Equal(t, int64(0), resp.Users[3].LastSeenAt)
 	})
 }
+
+func TestUserDeviceServiceUpdateDeviceStatus(t *testing.T) {
+	initUserDeviceTestLogger()
+
+	t.Run("nil_request", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceStatus(context.Background(), nil)
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("empty_user_uuid", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "",
+			DeviceId: "d1",
+			Status:   0,
+		})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("empty_device_id", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "",
+			Status:   0,
+		})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("invalid_status_kicked", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   int32(model.DeviceStatusKicked), // 3, 不允许
+		})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("invalid_status_logged_out", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   int32(model.DeviceStatusLoggedOut), // 2, 不允许
+		})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("success_online", func(t *testing.T) {
+		var captured struct {
+			userUUID string
+			deviceID string
+			status   int8
+		}
+		svc := NewDeviceService(&fakeDeviceRepository{
+			updateOnlineStatusFn: func(_ context.Context, userUUID, deviceID string, status int8) error {
+				captured.userUUID = userUUID
+				captured.deviceID = deviceID
+				captured.status = status
+				return nil
+			},
+		})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   0, // Online
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "u1", captured.userUUID)
+		assert.Equal(t, "d1", captured.deviceID)
+		assert.Equal(t, model.DeviceStatusOnline, captured.status)
+	})
+
+	t.Run("success_offline", func(t *testing.T) {
+		var capturedStatus int8
+		svc := NewDeviceService(&fakeDeviceRepository{
+			updateOnlineStatusFn: func(_ context.Context, _, _ string, status int8) error {
+				capturedStatus = status
+				return nil
+			},
+		})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   1, // Offline
+		})
+		require.NoError(t, err)
+		assert.Equal(t, model.DeviceStatusOffline, capturedStatus)
+	})
+
+	t.Run("idempotent_device_not_found", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{
+			updateOnlineStatusFn: func(_ context.Context, _, _ string, _ int8) error {
+				return repository.ErrRecordNotFound
+			},
+		})
+		// 设备不存在时应返回成功（幂等语义）
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d_gone",
+			Status:   1,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("repo_error", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{
+			updateOnlineStatusFn: func(_ context.Context, _, _ string, _ int8) error {
+				return errors.New("db write failed")
+			},
+		})
+		err := svc.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   0,
+		})
+		requireDeviceStatusCode(t, err, codes.Internal, consts.CodeInternalError)
+	})
+}

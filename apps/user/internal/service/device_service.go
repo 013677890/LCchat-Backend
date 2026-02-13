@@ -358,3 +358,45 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 		Users: users,
 	}, nil
 }
+
+// UpdateDeviceStatus 更新设备在线状态（内部调用）。
+// 由 connect 服务在连接建立/断开时调用。
+// 幂等语义：设备不存在时视为成功（可能设备已被踢出或注销）。
+func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error {
+	if req == nil || req.UserUuid == "" || req.DeviceId == "" {
+		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	// 仅允许 0(在线) 和 1(离线) 两种状态。
+	targetStatus := int8(req.Status)
+	if targetStatus != model.DeviceStatusOnline && targetStatus != model.DeviceStatusOffline {
+		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	if err := s.deviceRepo.UpdateOnlineStatus(ctx, req.UserUuid, req.DeviceId, targetStatus); err != nil {
+		// 幂等语义：设备不存在时不视为错误。
+		// 场景：设备已被踢出/注销后 connect 的延迟断连通知。
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			logger.Info(ctx, "UpdateDeviceStatus: 设备不存在，跳过",
+				logger.String("user_uuid", req.UserUuid),
+				logger.String("device_id", req.DeviceId),
+				logger.Int("status", int(targetStatus)),
+			)
+			return nil
+		}
+		logger.Error(ctx, "UpdateDeviceStatus: 更新设备状态失败",
+			logger.String("user_uuid", req.UserUuid),
+			logger.String("device_id", req.DeviceId),
+			logger.Int("status", int(targetStatus)),
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	logger.Info(ctx, "UpdateDeviceStatus: 设备状态已更新",
+		logger.String("user_uuid", req.UserUuid),
+		logger.String("device_id", req.DeviceId),
+		logger.Int("status", int(targetStatus)),
+	)
+	return nil
+}

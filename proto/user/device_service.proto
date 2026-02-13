@@ -25,6 +25,12 @@ service DeviceService {
 	
 	// BatchGetOnlineStatus 批量获取在线状态
 	rpc BatchGetOnlineStatus(BatchGetOnlineStatusRequest) returns (BatchGetOnlineStatusResponse);
+
+	// UpdateDeviceStatus 更新设备在线状态（内部调用）。
+	// 由 connect 服务在 WebSocket 连接建立/断开时调用，
+	// 将设备状态同步到 DB 和 Redis 缓存。
+	// 幂等语义：设备不存在时视为成功。
+	rpc UpdateDeviceStatus(UpdateDeviceStatusRequest) returns (UpdateDeviceStatusResponse);
 }
 
 // ==================== 设备列表 ====================
@@ -81,6 +87,22 @@ message BatchGetOnlineStatusRequest {
 message BatchGetOnlineStatusResponse {
 	repeated OnlineStatusItem users = 1;
 }
+
+// ==================== 更新设备状态（内部调用） ====================
+
+// UpdateDeviceStatusRequest 更新设备在线状态请求
+// 由 connect 服务在连接建立/断开时调用。
+message UpdateDeviceStatusRequest {
+	// user_uuid: 目标用户 UUID。
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	// device_id: 目标设备 ID。
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+	// status: 设备状态，仅允许 0(在线) 和 1(离线)。
+	int32 status = 3 [(validate.rules).int32 = {in: [0, 1]}];
+}
+
+// UpdateDeviceStatusResponse 更新设备在线状态响应
+message UpdateDeviceStatusResponse {}
 
 // ==================== 通用类型定义 ====================
 // 导入自 common.proto：

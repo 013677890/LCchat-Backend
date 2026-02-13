@@ -39,3 +39,8 @@ func (h *DeviceHandler) GetOnlineStatus(ctx context.Context, req *pb.GetOnlineSt
 func (h *DeviceHandler) BatchGetOnlineStatus(ctx context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error) {
 	return h.deviceService.BatchGetOnlineStatus(ctx, req)
 }
+
+// UpdateDeviceStatus 更新设备在线状态（内部调用）
+func (h *DeviceHandler) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) (*pb.UpdateDeviceStatusResponse, error) {
+	return &pb.UpdateDeviceStatusResponse{}, h.deviceService.UpdateDeviceStatus(ctx, req)
+}

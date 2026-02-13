@@ -162,6 +162,10 @@ type IDeviceService interface {
 
 	// BatchGetOnlineStatus 批量获取在线状态
 	BatchGetOnlineStatus(ctx context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error)
+
+	// UpdateDeviceStatus 更新设备在线状态（内部调用）
+	// 由 connect 服务在连接建立/断开时调用。
+	UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error
 }
 
 // ==================== 别名类型定义（用于向后兼容）====================

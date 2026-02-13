@@ -17,6 +17,7 @@ type fakeDeviceHandlerService struct {
 	kickDeviceFn           func(context.Context, *pb.KickDeviceRequest) error
 	getOnlineStatusFn      func(context.Context, *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error)
 	batchGetOnlineStatusFn func(context.Context, *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error)
+	updateDeviceStatusFn   func(context.Context, *pb.UpdateDeviceStatusRequest) error
 }
 
 var _ service.IDeviceService = (*fakeDeviceHandlerService)(nil)
@@ -47,6 +48,13 @@ func (f *fakeDeviceHandlerService) BatchGetOnlineStatus(ctx context.Context, req
 		return &pb.BatchGetOnlineStatusResponse{}, nil
 	}
 	return f.batchGetOnlineStatusFn(ctx, req)
+}
+
+func (f *fakeDeviceHandlerService) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error {
+	if f.updateDeviceStatusFn == nil {
+		return nil
+	}
+	return f.updateDeviceStatusFn(ctx, req)
 }
 
 func TestUserDeviceHandlerGetDeviceList(t *testing.T) {
@@ -158,5 +166,43 @@ func TestUserDeviceHandlerBatchGetOnlineStatus(t *testing.T) {
 		resp, err := h.BatchGetOnlineStatus(context.Background(), &pb.BatchGetOnlineStatusRequest{UserUuids: []string{"u1"}})
 		assert.Nil(t, resp)
 		require.ErrorIs(t, err, wantErr)
+	})
+}
+
+func TestUserDeviceHandlerUpdateDeviceStatus(t *testing.T) {
+	t.Run("success_empty_response_contract", func(t *testing.T) {
+		h := NewDeviceHandler(&fakeDeviceHandlerService{
+			updateDeviceStatusFn: func(_ context.Context, req *pb.UpdateDeviceStatusRequest) error {
+				require.Equal(t, "u1", req.UserUuid)
+				require.Equal(t, "d1", req.DeviceId)
+				require.Equal(t, int32(0), req.Status)
+				return nil
+			},
+		})
+		resp, err := h.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   0,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.IsType(t, &pb.UpdateDeviceStatusResponse{}, resp)
+	})
+
+	t.Run("error_passthrough", func(t *testing.T) {
+		wantErr := errors.New("update failed")
+		h := NewDeviceHandler(&fakeDeviceHandlerService{
+			updateDeviceStatusFn: func(_ context.Context, _ *pb.UpdateDeviceStatusRequest) error {
+				return wantErr
+			},
+		})
+		resp, err := h.UpdateDeviceStatus(context.Background(), &pb.UpdateDeviceStatusRequest{
+			UserUuid: "u1",
+			DeviceId: "d1",
+			Status:   1,
+		})
+		require.ErrorIs(t, err, wantErr)
+		require.NotNil(t, resp)
+		assert.IsType(t, &pb.UpdateDeviceStatusResponse{}, resp)
 	})
 }
