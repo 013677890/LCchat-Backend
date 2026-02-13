@@ -352,6 +352,36 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 	}, nil
 }
 
+// UpdateDeviceActive 批量更新设备活跃时间（内部调用）。
+// 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间。
+func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *pb.UpdateDeviceActiveRequest) error {
+	if req == nil || len(req.Items) == 0 {
+		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+	}
+
+	nowSec := time.Now().Unix()
+	repoItems := make([]repository.DeviceActiveItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		if item == nil || item.UserUuid == "" || item.DeviceId == "" {
+			return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		}
+		repoItems = append(repoItems, repository.DeviceActiveItem{
+			UserUUID: item.UserUuid,
+			DeviceID: item.DeviceId,
+		})
+	}
+
+	if err := s.deviceRepo.BatchSetActiveTimestamps(ctx, repoItems, nowSec); err != nil {
+		logger.Error(ctx, "UpdateDeviceActive: 批量更新设备活跃时间失败",
+			logger.Int("item_count", len(repoItems)),
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	return nil
+}
+
 // UpdateDeviceStatus 更新设备在线状态（内部调用）。
 // 由 connect 服务在连接建立/断开时调用。
 // 幂等语义：设备不存在时视为成功（可能设备已被踢出或注销）。
@@ -391,18 +421,6 @@ func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *pb.Upda
 		logger.String("device_id", req.DeviceId),
 		logger.Int("status", int(targetStatus)),
 	)
-
-	// 在线状态时刷新 Redis 活跃时间（使用 user 服务本地时间）。
-	// 失败不影响主流程，避免短暂 Redis 故障放大为连接链路失败。
-	if targetStatus == model.DeviceStatusOnline {
-		if err := s.deviceRepo.SetActiveTimestamp(ctx, req.UserUuid, req.DeviceId, time.Now().Unix()); err != nil {
-			logger.Warn(ctx, "UpdateDeviceStatus: 更新设备活跃时间失败（已降级）",
-				logger.String("user_uuid", req.UserUuid),
-				logger.String("device_id", req.DeviceId),
-				logger.ErrorField("error", err),
-			)
-		}
-	}
 
 	return nil
 }

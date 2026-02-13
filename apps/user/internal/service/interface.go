@@ -163,6 +163,10 @@ type IDeviceService interface {
 	// BatchGetOnlineStatus 批量获取在线状态
 	BatchGetOnlineStatus(ctx context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error)
 
+	// UpdateDeviceActive 批量更新设备活跃时间（内部调用）
+	// 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间。
+	UpdateDeviceActive(ctx context.Context, req *pb.UpdateDeviceActiveRequest) error
+
 	// UpdateDeviceStatus 更新设备在线状态（内部调用）
 	// 由 connect 服务在连接建立/断开时调用。
 	UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error

@@ -40,6 +40,11 @@ func (h *DeviceHandler) BatchGetOnlineStatus(ctx context.Context, req *pb.BatchG
 	return h.deviceService.BatchGetOnlineStatus(ctx, req)
 }
 
+// UpdateDeviceActive 批量更新设备活跃时间（内部调用）
+func (h *DeviceHandler) UpdateDeviceActive(ctx context.Context, req *pb.UpdateDeviceActiveRequest) (*pb.UpdateDeviceActiveResponse, error) {
+	return &pb.UpdateDeviceActiveResponse{}, h.deviceService.UpdateDeviceActive(ctx, req)
+}
+
 // UpdateDeviceStatus 更新设备在线状态（内部调用）
 func (h *DeviceHandler) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) (*pb.UpdateDeviceStatusResponse, error) {
 	return &pb.UpdateDeviceStatusResponse{}, h.deviceService.UpdateDeviceStatus(ctx, req)

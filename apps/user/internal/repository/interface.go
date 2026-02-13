@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// DeviceActiveItem 设备活跃时间批量更新项
+type DeviceActiveItem struct {
+	UserUUID string
+	DeviceID string
+}
+
 // ==================== 认证相关 Repository ====================
 
 // IAuthRepository 认证相关数据访问接口
@@ -147,7 +153,7 @@ type IFriendRepository interface {
 	GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error)
 
 	// SyncFriendList 增量同步好友列表
-	SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error) 
+	SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error)
 }
 
 // ==================== 好友申请 Repository ====================
@@ -239,6 +245,9 @@ type IDeviceRepository interface {
 
 	// SetActiveTimestamp 设置设备活跃时间戳（unix 秒）并续期
 	SetActiveTimestamp(ctx context.Context, userUUID, deviceID string, ts int64) error
+
+	// BatchSetActiveTimestamps 批量设置设备活跃时间戳（unix 秒）并续期
+	BatchSetActiveTimestamps(ctx context.Context, items []DeviceActiveItem, ts int64) error
 
 	// UpdateOnlineStatus 更新在线状态
 	UpdateOnlineStatus(ctx context.Context, userUUID, deviceID string, status int8) error

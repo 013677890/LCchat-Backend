@@ -60,6 +60,7 @@ type fakeDeviceRepository struct {
 	touchDeviceInfoTTLFn   func(context.Context, string) error
 	getActiveTimestampsFn  func(context.Context, string, []string) (map[string]int64, error)
 	setActiveTimestampFn   func(context.Context, string, string, int64) error
+	batchSetActiveTsFn     func(context.Context, []repository.DeviceActiveItem, int64) error
 	updateOnlineStatusFn   func(context.Context, string, string, int8) error
 	updateLastSeenFn       func(context.Context, string, string) error
 	deleteFn               func(context.Context, string, string) error
@@ -121,6 +122,13 @@ func (f *fakeDeviceRepository) SetActiveTimestamp(ctx context.Context, userUUID,
 		return nil
 	}
 	return f.setActiveTimestampFn(ctx, userUUID, deviceID, ts)
+}
+
+func (f *fakeDeviceRepository) BatchSetActiveTimestamps(ctx context.Context, items []repository.DeviceActiveItem, ts int64) error {
+	if f.batchSetActiveTsFn == nil {
+		return nil
+	}
+	return f.batchSetActiveTsFn(ctx, items, ts)
 }
 
 func (f *fakeDeviceRepository) UpdateOnlineStatus(ctx context.Context, userUUID, deviceID string, status int8) error {
@@ -726,5 +734,75 @@ func TestUserDeviceServiceUpdateDeviceStatus(t *testing.T) {
 			Status:   0,
 		})
 		requireDeviceStatusCode(t, err, codes.Internal, consts.CodeInternalError)
+	})
+}
+
+func TestUserDeviceServiceUpdateDeviceActive(t *testing.T) {
+	initUserDeviceTestLogger()
+
+	t.Run("nil_request", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceActive(context.Background(), nil)
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("empty_items", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceActive(context.Background(), &pb.UpdateDeviceActiveRequest{Items: []*pb.UpdateDeviceActiveItem{}})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("invalid_item", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{})
+		err := svc.UpdateDeviceActive(context.Background(), &pb.UpdateDeviceActiveRequest{
+			Items: []*pb.UpdateDeviceActiveItem{
+				{UserUuid: "u1", DeviceId: "d1"},
+				{UserUuid: "", DeviceId: "d2"},
+			},
+		})
+		requireDeviceStatusCode(t, err, codes.InvalidArgument, consts.CodeParamError)
+	})
+
+	t.Run("repo_error", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{
+			batchSetActiveTsFn: func(_ context.Context, items []repository.DeviceActiveItem, ts int64) error {
+				require.Len(t, items, 1)
+				assert.Equal(t, "u1", items[0].UserUUID)
+				assert.Equal(t, "d1", items[0].DeviceID)
+				assert.Greater(t, ts, int64(0))
+				return errors.New("redis write failed")
+			},
+		})
+		err := svc.UpdateDeviceActive(context.Background(), &pb.UpdateDeviceActiveRequest{
+			Items: []*pb.UpdateDeviceActiveItem{
+				{UserUuid: "u1", DeviceId: "d1"},
+			},
+		})
+		requireDeviceStatusCode(t, err, codes.Internal, consts.CodeInternalError)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		svc := NewDeviceService(&fakeDeviceRepository{
+			batchSetActiveTsFn: func(_ context.Context, items []repository.DeviceActiveItem, ts int64) error {
+				assert.Greater(t, ts, int64(0))
+				require.Len(t, items, 3)
+				got := make(map[string]bool, len(items))
+				for _, item := range items {
+					got[item.UserUUID+":"+item.DeviceID] = true
+				}
+				assert.True(t, got["u1:d1"])
+				assert.True(t, got["u1:d2"])
+				assert.True(t, got["u2:d3"])
+				return nil
+			},
+		})
+		err := svc.UpdateDeviceActive(context.Background(), &pb.UpdateDeviceActiveRequest{
+			Items: []*pb.UpdateDeviceActiveItem{
+				{UserUuid: "u1", DeviceId: "d1"},
+				{UserUuid: "u1", DeviceId: "d2"},
+				{UserUuid: "u2", DeviceId: "d3"},
+			},
+		})
+		require.NoError(t, err)
 	})
 }

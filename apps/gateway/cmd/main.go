@@ -140,17 +140,30 @@ func main() {
 	// 5.2.1 初始化设备活跃时间同步器（分片节流 map + 缓冲 map 批量消费）
 	deviceRPCClient := userpb.NewDeviceServiceClient(userServiceConn)
 	if err := middleware.InitDeviceActiveSyncer(deviceActiveCfg, func(_ context.Context, items []deviceactive.BatchItem) error {
+		const batchSize = 1000
 		var firstErr error
-		for _, item := range items {
+		for start := 0; start < len(items); start += batchSize {
+			end := start + batchSize
+			if end > len(items) {
+				end = len(items)
+			}
+			activeItems := make([]*userpb.UpdateDeviceActiveItem, 0, end-start)
+			for i := start; i < end; i++ {
+				activeItems = append(activeItems, &userpb.UpdateDeviceActiveItem{
+					UserUuid: items[i].UserUUID,
+					DeviceId: items[i].DeviceID,
+				})
+			}
+
 			rpcCtx, cancel := context.WithTimeout(context.Background(), deviceActiveCfg.RPCTimeout)
-			_, err := deviceRPCClient.UpdateDeviceStatus(rpcCtx, &userpb.UpdateDeviceStatusRequest{
-				UserUuid: item.UserUUID,
-				DeviceId: item.DeviceID,
-				Status:   0, // 在线：用于触发 user 侧活跃时间更新
-			})
+			_, err := deviceRPCClient.UpdateDeviceActive(rpcCtx, &userpb.UpdateDeviceActiveRequest{Items: activeItems})
 			cancel()
 			if err != nil && firstErr == nil {
 				firstErr = err
+				logger.Error(ctx, "批量更新设备活跃时间失败",
+					logger.ErrorField("error", err),
+					logger.Int("item_count", len(activeItems)),
+				)
 			}
 		}
 		return firstErr

@@ -231,23 +231,79 @@ func (r *deviceRepositoryImpl) SetActiveTimestamp(ctx context.Context, userUUID,
 	if r.redisClient == nil {
 		return nil
 	}
-	key := r.deviceActiveKey(userUUID)
+	return r.BatchSetActiveTimestamps(ctx, []DeviceActiveItem{
+		{
+			UserUUID: userUUID,
+			DeviceID: deviceID,
+		},
+	}, ts)
+}
+
+// BatchSetActiveTimestamps 批量设置设备活跃时间戳（unix 秒）并续期（zset）。
+// 写入时顺手清理 5 分钟之外的过期设备。
+func (r *deviceRepositoryImpl) BatchSetActiveTimestamps(ctx context.Context, items []DeviceActiveItem, ts int64) error {
+	if r.redisClient == nil || len(items) == 0 {
+		return nil
+	}
+
+	grouped := make(map[string]map[string]struct{})
+	for _, item := range items {
+		if item.UserUUID == "" || item.DeviceID == "" {
+			continue
+		}
+		deviceSet, ok := grouped[item.UserUUID]
+		if !ok {
+			deviceSet = make(map[string]struct{})
+			grouped[item.UserUUID] = deviceSet
+		}
+		deviceSet[item.DeviceID] = struct{}{}
+	}
+	if len(grouped) == 0 {
+		return nil
+	}
+
 	cutoff := time.Now().Add(-5 * time.Minute).Unix()
 	pipe := r.redisClient.Pipeline()
-	pipe.ZAdd(ctx, key, redis.Z{
-		Score:  float64(ts),
-		Member: deviceID,
-	})
-	pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(cutoff, 10))
-	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
-		cmds := []mq.RedisCmd{
-			{Command: "zadd", Args: []interface{}{key, ts, deviceID}},
-			{Command: "zremrangebyscore", Args: []interface{}{key, "-inf", cutoff}},
-			{Command: "expire", Args: []interface{}{key, int(rediskey.DeviceActiveTTL.Seconds())}},
+	retryCmds := make([]mq.RedisCmd, 0, len(grouped)*3)
+	for userUUID, deviceSet := range grouped {
+		key := r.deviceActiveKey(userUUID)
+
+		zItems := make([]redis.Z, 0, len(deviceSet))
+		zaddArgs := make([]interface{}, 0, 1+len(deviceSet)*2)
+		zaddArgs = append(zaddArgs, key)
+		for deviceID := range deviceSet {
+			zItems = append(zItems, redis.Z{
+				Score:  float64(ts),
+				Member: deviceID,
+			})
+			zaddArgs = append(zaddArgs, ts, deviceID)
 		}
-		task := mq.BuildPipelineTask(cmds).
-			WithSource("DeviceRepository.SetActiveTimestamp").
+		if len(zItems) == 0 {
+			continue
+		}
+
+		pipe.ZAdd(ctx, key, zItems...)
+		pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(cutoff, 10))
+		pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
+
+		retryCmds = append(retryCmds, mq.RedisCmd{Command: "zadd", Args: zaddArgs})
+		retryCmds = append(retryCmds, mq.RedisCmd{
+			Command: "zremrangebyscore",
+			Args:    []interface{}{key, "-inf", cutoff},
+		})
+		retryCmds = append(retryCmds, mq.RedisCmd{
+			Command: "expire",
+			Args:    []interface{}{key, int(rediskey.DeviceActiveTTL.Seconds())},
+		})
+	}
+
+	if len(retryCmds) == 0 {
+		return nil
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		task := mq.BuildPipelineTask(retryCmds).
+			WithSource("DeviceRepository.BatchSetActiveTimestamps").
 			WithMaxRetries(5)
 		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)

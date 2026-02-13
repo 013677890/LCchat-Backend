@@ -93,16 +93,29 @@ func main() {
 			WorkerCount:    deviceActiveCfg.WorkerCount,
 			QueueSize:      deviceActiveCfg.QueueSize,
 			BatchHandler: func(_ context.Context, items []deviceactive.BatchItem) error {
+				const batchSize = 1000
 				var firstErr error
-				for _, item := range items {
+				for start := 0; start < len(items); start += batchSize {
+					end := start + batchSize
+					if end > len(items) {
+						end = len(items)
+					}
+					activeItems := make([]*userpb.UpdateDeviceActiveItem, 0, end-start)
+					for i := start; i < end; i++ {
+						activeItems = append(activeItems, &userpb.UpdateDeviceActiveItem{
+							UserUuid: items[i].UserUUID,
+							DeviceId: items[i].DeviceID,
+						})
+					}
+
 					rpcCtx, cancel := context.WithTimeout(context.Background(), deviceActiveCfg.RPCTimeout)
-					_, callErr := userDeviceClient.UpdateDeviceStatus(rpcCtx, &userpb.UpdateDeviceStatusRequest{
-						UserUuid: item.UserUUID,
-						DeviceId: item.DeviceID,
-						Status:   int32(0), // 在线：用于触发 user 侧活跃时间更新
-					})
+					_, callErr := userDeviceClient.UpdateDeviceActive(rpcCtx, &userpb.UpdateDeviceActiveRequest{Items: activeItems})
 					cancel()
 					if callErr != nil && firstErr == nil {
+						logger.Error(ctx, "Connect 批量更新设备活跃时间失败",
+							logger.ErrorField("error", callErr),
+							logger.Int("item_count", len(activeItems)),
+						)
 						firstErr = callErr
 					}
 				}
