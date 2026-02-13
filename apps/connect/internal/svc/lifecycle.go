@@ -2,7 +2,6 @@ package svc
 
 import (
 	userpb "ChatServer/apps/user/pb"
-	rediskey "ChatServer/consts/redisKey"
 	"ChatServer/model"
 	"ChatServer/pkg/logger"
 	"context"
@@ -10,11 +9,6 @@ import (
 )
 
 const (
-	// activeThrottleInterval 心跳活跃时间写 Redis 的最小间隔。
-	// 在该窗口内的重复心跳只更新本地缓存，不触发 Redis 写入，
-	// 以降低高频心跳对 Redis 的写压力。
-	activeThrottleInterval = 5 * time.Minute
-
 	// deviceStatusRPCTimeout UpdateDeviceStatus RPC 调用超时时间。
 	deviceStatusRPCTimeout = 3 * time.Second
 
@@ -35,17 +29,24 @@ type deviceStatusTask struct {
 
 // OnConnect 在连接建立后触发。
 // 行为：
-// 1. 立即写入设备活跃时间（用于在线状态判定），不受节流限制；
+// 1. 立即触发活跃时间同步（不受节流限制）；
 // 2. 异步调用 user-service RPC 将 DeviceSession.status 置为在线。
 func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
-	s.touchActive(ctx, session.UserUUID, session.DeviceID, true)
+	if s.activeSyncer != nil {
+		// 连接建立时强制刷新：先删除节流记录再 touch，确保本次会入缓冲 map。
+		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
+		_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
+	}
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOnline)
 }
 
 // OnHeartbeat 在收到客户端心跳后触发。
-// 受 5 分钟本地节流保护：窗口内的重复心跳不会触发 Redis 写入。
+// 受本地节流保护：窗口内的重复心跳不会重复触发同步。
 func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
-	s.touchActive(ctx, session.UserUUID, session.DeviceID, false)
+	if s.activeSyncer == nil {
+		return
+	}
+	_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
 }
 
 // OnDisconnect 在连接断开后触发。
@@ -53,8 +54,9 @@ func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
 // 1. 清理本地节流缓存，避免内存泄漏；
 // 2. 异步调用 user-service RPC 将 DeviceSession.status 置为离线。
 func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
-	throttleKey := session.UserUUID + ":" + session.DeviceID
-	s.activeThrottle.Delete(throttleKey)
+	if s.activeSyncer != nil {
+		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
+	}
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOffline)
 }
 
@@ -111,47 +113,4 @@ func (s *ConnectService) statusWorker() {
 
 		cancel()
 	}
-}
-
-// touchActive 更新设备活跃时间到 Redis。
-// Key 规则：
-// - key:   user:devices:active:{user_uuid}
-// - field: device_id
-// - value: unix 秒
-//
-// 节流策略：
-// - force=true 时立即写入（用于 OnConnect 等必须即时生效的场景）；
-// - force=false 时，若距上次写入不足 activeThrottleInterval（5 分钟），则跳过。
-func (s *ConnectService) touchActive(ctx context.Context, userUUID, deviceID string, force bool) {
-	if s.redisClient == nil || userUUID == "" || deviceID == "" {
-		return
-	}
-
-	now := time.Now()
-	throttleKey := userUUID + ":" + deviceID
-
-	if !force {
-		if last, ok := s.activeThrottle.Load(throttleKey); ok {
-			if now.Sub(time.Unix(last.(int64), 0)) < activeThrottleInterval {
-				return
-			}
-		}
-	}
-
-	key := rediskey.DeviceActiveKey(userUUID)
-	ts := now.Unix()
-	pipe := s.redisClient.Pipeline()
-	pipe.HSet(ctx, key, deviceID, ts)
-	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
-
-	if _, err := pipe.Exec(ctx); err != nil {
-		logger.Warn(ctx, "更新设备活跃时间失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", deviceID),
-			logger.ErrorField("error", err),
-		)
-		return
-	}
-
-	s.activeThrottle.Store(throttleKey, ts)
 }

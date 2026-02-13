@@ -398,5 +398,18 @@ func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *pb.Upda
 		logger.String("device_id", req.DeviceId),
 		logger.Int("status", int(targetStatus)),
 	)
+
+	// 在线状态时刷新 Redis 活跃时间（使用 user 服务本地时间）。
+	// 失败不影响主流程，避免短暂 Redis 故障放大为连接链路失败。
+	if targetStatus == model.DeviceStatusOnline {
+		if err := s.deviceRepo.SetActiveTimestamp(ctx, req.UserUuid, req.DeviceId, time.Now().Unix()); err != nil {
+			logger.Warn(ctx, "UpdateDeviceStatus: 更新设备活跃时间失败（已降级）",
+				logger.String("user_uuid", req.UserUuid),
+				logger.String("device_id", req.DeviceId),
+				logger.ErrorField("error", err),
+			)
+		}
+	}
+
 	return nil
 }

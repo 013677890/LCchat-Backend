@@ -26,6 +26,10 @@ service DeviceService {
 	// BatchGetOnlineStatus 批量获取在线状态
 	rpc BatchGetOnlineStatus(BatchGetOnlineStatusRequest) returns (BatchGetOnlineStatusResponse);
 
+	// UpdateDeviceActive 批量更新设备活跃时间（内部调用）。
+	// 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间，不修改设备在线状态。
+	rpc UpdateDeviceActive(UpdateDeviceActiveRequest) returns (UpdateDeviceActiveResponse);
+
 	// UpdateDeviceStatus 更新设备在线状态（内部调用）。
 	// 由 connect 服务在 WebSocket 连接建立/断开时调用，
 	// 将设备状态同步到 DB 和 Redis 缓存。
@@ -89,6 +93,24 @@ message BatchGetOnlineStatusResponse {
 }
 
 // ==================== 更新设备状态（内部调用） ====================
+
+// UpdateDeviceActiveItem 设备活跃时间更新项
+message UpdateDeviceActiveItem {
+	// user_uuid: 目标用户 UUID。
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	// device_id: 目标设备 ID。
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+}
+
+// UpdateDeviceActiveRequest 批量更新设备活跃时间请求
+// 由 gateway/connect 在本地节流后调用。
+message UpdateDeviceActiveRequest {
+	// items: 批量设备活跃时间列表（建议单次不超过 10000 条）。
+	repeated UpdateDeviceActiveItem items = 1 [(validate.rules).repeated = {min_items: 1, max_items: 10000}];
+}
+
+// UpdateDeviceActiveResponse 更新设备活跃时间响应
+message UpdateDeviceActiveResponse {}
 
 // UpdateDeviceStatusRequest 更新设备在线状态请求
 // 由 connect 服务在连接建立/断开时调用。

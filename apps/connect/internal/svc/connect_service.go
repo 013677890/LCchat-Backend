@@ -2,6 +2,7 @@ package svc
 
 import (
 	userpb "ChatServer/apps/user/pb"
+	"ChatServer/pkg/deviceactive"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -37,17 +38,18 @@ type ErrorData struct {
 type ConnectService struct {
 	redisClient      *redis.Client
 	userDeviceClient userpb.DeviceServiceClient // 可为 nil，降级时跳过 RPC
-	activeThrottle   sync.Map                   // key: "userUUID:deviceID" → value: int64(上次写 Redis 的 unix 秒)
-	statusQueue      chan deviceStatusTask      // 设备状态 RPC 任务队列
-	statusWg         sync.WaitGroup             // 等待工作协程退出
+	activeSyncer     *deviceactive.Syncer
+	statusQueue      chan deviceStatusTask // 设备状态 RPC 任务队列
+	statusWg         sync.WaitGroup        // 等待工作协程退出
 }
 
 // NewConnectService 创建业务服务实例。
 // userDeviceClient 可为 nil：此时设备状态 RPC 会被跳过（降级运行）。
-func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.DeviceServiceClient) *ConnectService {
+func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.DeviceServiceClient, activeSyncer *deviceactive.Syncer) *ConnectService {
 	s := &ConnectService{
 		redisClient:      redisClient,
 		userDeviceClient: userDeviceClient,
+		activeSyncer:     activeSyncer,
 	}
 
 	// 仅在 userDeviceClient 可用时启动工作协程。
@@ -62,12 +64,14 @@ func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.Device
 	return s
 }
 
-// ShutdownStatusWorkers 优雅关闭设备状态工作协程。
-// 关闭 channel 后等待所有 worker 排空队列并退出。
+// ShutdownStatusWorkers 优雅关闭后台协程。
 func (s *ConnectService) ShutdownStatusWorkers() {
 	if s.statusQueue != nil {
 		close(s.statusQueue)
 		s.statusWg.Wait()
+	}
+	if s.activeSyncer != nil {
+		s.activeSyncer.Stop()
 	}
 }
 

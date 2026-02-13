@@ -6,6 +6,7 @@ import (
 	"ChatServer/apps/gateway/internal/router"
 	v1 "ChatServer/apps/gateway/internal/router/v1"
 	"ChatServer/apps/gateway/internal/service"
+	userpb "ChatServer/apps/user/pb"
 	"ChatServer/config"
 	"ChatServer/consts/redisKey"
 	"ChatServer/pkg/async"
@@ -110,18 +111,8 @@ func main() {
 		logger.String("blacklist_key", rediskey.GatewayIPBlacklistKey()),
 	)
 
-	// 4.5 初始化设备活跃时间 LRU 缓存
+	// 4.5 读取设备活跃同步配置（实际初始化在 gRPC 客户端创建后执行）
 	deviceActiveCfg := config.DefaultDeviceActiveConfig()
-	if err := deviceactive.Init(deviceActiveCfg.CacheSize); err != nil {
-		logger.Error(ctx, "设备活跃时间缓存初始化失败",
-			logger.ErrorField("error", err),
-			logger.Int("cache_size", deviceActiveCfg.CacheSize),
-		)
-	} else {
-		logger.Info(ctx, "设备活跃时间缓存初始化完成",
-			logger.Int("cache_size", deviceActiveCfg.CacheSize),
-		)
-	}
 
 	// 5. 初始化 gRPC 客户端（依赖注入）
 	userServiceAddr := os.Getenv("USER_SERVICE_ADDR")
@@ -145,6 +136,37 @@ func main() {
 		}
 	}()
 	logger.Info(ctx, "用户服务 gRPC 连接创建成功", logger.String("address", userServiceAddr))
+
+	// 5.2.1 初始化设备活跃时间同步器（分片节流 map + 缓冲 map 批量消费）
+	deviceRPCClient := userpb.NewDeviceServiceClient(userServiceConn)
+	if err := middleware.InitDeviceActiveSyncer(deviceActiveCfg, func(_ context.Context, items []deviceactive.BatchItem) error {
+		var firstErr error
+		for _, item := range items {
+			rpcCtx, cancel := context.WithTimeout(context.Background(), deviceActiveCfg.RPCTimeout)
+			_, err := deviceRPCClient.UpdateDeviceStatus(rpcCtx, &userpb.UpdateDeviceStatusRequest{
+				UserUuid: item.UserUUID,
+				DeviceId: item.DeviceID,
+				Status:   0, // 在线：用于触发 user 侧活跃时间更新
+			})
+			cancel()
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	}); err != nil {
+		logger.Error(ctx, "设备活跃同步器初始化失败",
+			logger.ErrorField("error", err),
+		)
+	} else {
+		logger.Info(ctx, "设备活跃同步器初始化完成",
+			logger.Int("shard_count", deviceActiveCfg.ShardCount),
+			logger.Duration("update_interval", deviceActiveCfg.UpdateInterval),
+			logger.Duration("flush_interval", deviceActiveCfg.FlushInterval),
+			logger.Int("worker_count", deviceActiveCfg.WorkerCount),
+		)
+	}
+	defer middleware.ShutdownDeviceActiveSyncer()
 
 	// 5.3 创建 gRPC 客户端
 	userClient := pb.NewUserServiceClient(userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceBreaker)

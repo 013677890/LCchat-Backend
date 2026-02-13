@@ -9,6 +9,7 @@ import (
 	userpb "ChatServer/apps/user/pb"
 	"ChatServer/config"
 	"ChatServer/pkg/ctxmeta"
+	"ChatServer/pkg/deviceactive"
 	"ChatServer/pkg/logger"
 	pkgredis "ChatServer/pkg/redis"
 	"context"
@@ -40,7 +41,7 @@ func main() {
 
 	// 2) 初始化 Redis。
 	// 说明：
-	// - connect 的鉴权兜底与设备活跃时间写入都依赖 Redis。
+	// - connect 的鉴权兜底依赖 Redis。
 	// - 这里采用降级策略：Redis 不可用时服务仍可启动（仅能力受限）。
 	redisCfg := config.DefaultRedisConfig()
 	redisClient, err := pkgredis.Build(redisCfg)
@@ -81,12 +82,54 @@ func main() {
 		)
 	}
 
+	// 3.5) 初始化设备活跃时间同步器（分片节流 map + 缓冲 map + 后台批量消费）。
+	deviceActiveCfg := config.DefaultDeviceActiveConfig()
+	var activeSyncer *deviceactive.Syncer
+	if userDeviceClient != nil {
+		activeSyncer, err = deviceactive.NewSyncer(deviceactive.Config{
+			ShardCount:     deviceActiveCfg.ShardCount,
+			UpdateInterval: deviceActiveCfg.UpdateInterval,
+			FlushInterval:  deviceActiveCfg.FlushInterval,
+			WorkerCount:    deviceActiveCfg.WorkerCount,
+			QueueSize:      deviceActiveCfg.QueueSize,
+			BatchHandler: func(_ context.Context, items []deviceactive.BatchItem) error {
+				var firstErr error
+				for _, item := range items {
+					rpcCtx, cancel := context.WithTimeout(context.Background(), deviceActiveCfg.RPCTimeout)
+					_, callErr := userDeviceClient.UpdateDeviceStatus(rpcCtx, &userpb.UpdateDeviceStatusRequest{
+						UserUuid: item.UserUUID,
+						DeviceId: item.DeviceID,
+						Status:   int32(0), // 在线：用于触发 user 侧活跃时间更新
+					})
+					cancel()
+					if callErr != nil && firstErr == nil {
+						firstErr = callErr
+					}
+				}
+				return firstErr
+			},
+		})
+		if err != nil {
+			logger.Warn(ctx, "Connect 设备活跃同步器初始化失败，降级为无活跃时间同步",
+				logger.ErrorField("error", err),
+			)
+			activeSyncer = nil
+		} else {
+			logger.Info(ctx, "Connect 设备活跃同步器初始化完成",
+				logger.Int("shard_count", deviceActiveCfg.ShardCount),
+				logger.Duration("update_interval", deviceActiveCfg.UpdateInterval),
+				logger.Duration("flush_interval", deviceActiveCfg.FlushInterval),
+				logger.Int("worker_count", deviceActiveCfg.WorkerCount),
+			)
+		}
+	}
+
 	// 4) 组装核心依赖：
 	// - manager: 连接注册/注销与在线连接索引。
 	// - svc:     connect 业务逻辑（鉴权、心跳、活跃时间、设备状态）。
 	// - handler: Gin /ws 入口，承接协议层逻辑。
 	connManager := manager.NewConnectionManager()
-	connectSvc := svc.NewConnectService(redisClient, userDeviceClient)
+	connectSvc := svc.NewConnectService(redisClient, userDeviceClient, activeSyncer)
 	wsHandler := handler.NewWSHandler(connManager, connectSvc)
 
 	// 5) 构建 HTTP 服务（包含 /health、/metrics 与 /ws）。

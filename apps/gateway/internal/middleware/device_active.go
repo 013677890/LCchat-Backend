@@ -1,42 +1,65 @@
 package middleware
 
 import (
-	"ChatServer/consts/redisKey"
+	"ChatServer/config"
 	"ChatServer/pkg/deviceactive"
-	"ChatServer/pkg/logger"
-	pkgredis "ChatServer/pkg/redis"
-	"context"
+	"sync"
 	"time"
 )
+
+var (
+	deviceActiveSyncerMu sync.RWMutex
+	deviceActiveSyncer   *deviceactive.Syncer
+)
+
+// InitDeviceActiveSyncer 初始化活跃时间同步器（Gateway）。
+func InitDeviceActiveSyncer(cfg config.DeviceActiveConfig, handler deviceactive.BatchHandler) error {
+	syncer, err := deviceactive.NewSyncer(deviceactive.Config{
+		ShardCount:     cfg.ShardCount,
+		UpdateInterval: cfg.UpdateInterval,
+		FlushInterval:  cfg.FlushInterval,
+		WorkerCount:    cfg.WorkerCount,
+		QueueSize:      cfg.QueueSize,
+		BatchHandler:   handler,
+	})
+	if err != nil {
+		return err
+	}
+
+	deviceActiveSyncerMu.Lock()
+	old := deviceActiveSyncer
+	deviceActiveSyncer = syncer
+	deviceActiveSyncerMu.Unlock()
+
+	if old != nil {
+		old.Stop()
+	}
+	return nil
+}
+
+// ShutdownDeviceActiveSyncer 停止活跃时间同步器。
+func ShutdownDeviceActiveSyncer() {
+	deviceActiveSyncerMu.Lock()
+	syncer := deviceActiveSyncer
+	deviceActiveSyncer = nil
+	deviceActiveSyncerMu.Unlock()
+
+	if syncer != nil {
+		syncer.Stop()
+	}
+}
 
 func updateDeviceActive(userUUID, deviceID string) {
 	if userUUID == "" || deviceID == "" {
 		return
 	}
 
-	now := time.Now()
-	cacheKey := userUUID + ":" + deviceID
-	if !deviceactive.ShouldUpdate(cacheKey, now) {
+	deviceActiveSyncerMu.RLock()
+	syncer := deviceActiveSyncer
+	deviceActiveSyncerMu.RUnlock()
+	if syncer == nil {
 		return
 	}
 
-	redisClient := pkgredis.Client()
-	if redisClient == nil {
-		return
-	}
-
-	ctx := context.Background()
-	key := rediskey.DeviceActiveKey(userUUID)
-	ts := now.Unix()
-
-	pipe := redisClient.Pipeline()
-	pipe.HSet(ctx, key, deviceID, ts)
-	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
-		logger.Warn(ctx, "更新设备活跃时间失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", deviceID),
-			logger.ErrorField("error", err),
-		)
-	}
+	_ = syncer.Touch(userUUID, deviceID, time.Now())
 }
