@@ -8,7 +8,7 @@ import "proto/msg/msg_common.proto";
 
 // MsgPushEvent 为 msg-service 写入 Kafka 的消息推送事件。
 // Kafka Topic: msg.push
-// Kafka Key:   receiver_uuid（保证单用户/单群消息有序）
+// Kafka Key:   conv_id（保证同一会话的消息在同一 Partition 内有序消费）
 // Kafka Value: MsgPushEvent 序列化后的 bytes
 //
 // 扩散策略（由 Consumer 根据 conv_type 判断）：
@@ -16,10 +16,14 @@ import "proto/msg/msg_common.proto";
 //   Connect 直接 SendToUser(receiver_uuid)。
 // - conv_type=2（群聊，读扩散）：receiver_uuid 为群 UUID，
 //   Connect 查询 Redis 群成员列表后逐一 SendToUser(member_uuid)。
+//
+// 多端同步：Connect 消费到消息后，除了向 receiver_uuid（或群成员）投递，
+// 还需向 from_uuid 下除 device_id 以外的所有在线设备投递一份（Self-Sync）。
 message MsgPushEvent {
   // receiver_uuid: 单聊=对端用户 UUID；群聊=群 UUID。
   string receiver_uuid = 1;
   // device_id: 空=广播该用户所有在线设备；非空=仅推送指定设备。
+  // 对于多端同步场景，此字段用于排除发送方当前设备。
   string device_id = 2;
   // type: 消息类型，与 MessageEnvelope.type 保持一致。
   // 取值："MSG_PUSH" | "MSG_RECALL" | "MSG_MARK_READ"
@@ -35,4 +39,9 @@ message MsgPushEvent {
   string trace_id = 6;
   // server_ts: 服务端时间戳（unix 毫秒）。
   int64 server_ts = 7;
+  // from_uuid: 发送方 UUID。
+  // Connect 消费后用于多端同步：向 from_uuid 下除 device_id 以外的在线设备也投递一份，
+  // 实现发送方其他终端实时看到自己发出的消息。
+  string from_uuid = 8;
 }
+
