@@ -11,14 +11,20 @@ import "proto/msg/msg_common.proto";
 // Kafka Key:   conv_id（保证同一会话的消息在同一 Partition 内有序消费）
 // Kafka Value: MsgPushEvent 序列化后的 bytes
 //
-// 扩散策略（由 Consumer 根据 conv_type 判断）：
-// - conv_type=1（单聊，写扩散）：receiver_uuid 为对端用户 UUID，
-//   Connect 直接 SendToUser(receiver_uuid)。
-// - conv_type=2（群聊，读扩散）：receiver_uuid 为群 UUID，
-//   Connect 查询 Redis 群成员列表后逐一 SendToUser(member_uuid)。
+// 消费者：Push-Job（独立 Kafka 消费者服务）
+// Push-Job 的职责：
+//   1. 从 Kafka 拉取 MsgPushEvent
+//   2. 根据 conv_type 判断扩散策略：
+//      - conv_type=1（单聊，写扩散）：receiver_uuid 为对端用户 UUID
+//      - conv_type=2（群聊，读扩散）：receiver_uuid 为群 UUID，
+//        查询 Redis 群成员列表拆分为多个 user_uuid
+//   3. 对每个目标 user_uuid，查 Redis 路由表 user:routing:{uuid}
+//      获取其所在 Connect 节点的 gRPC 地址
+//   4. 通过 gRPC 调用对应 Connect 节点的 PushToUser 接口投递消息
+//   5. 多端同步（Self-Sync）：向 from_uuid 下除 device_id 以外的在线设备投递一份
 //
-// 多端同步：Connect 消费到消息后，除了向 receiver_uuid（或群成员）投递，
-// 还需向 from_uuid 下除 device_id 以外的所有在线设备投递一份（Self-Sync）。
+// 注意：msg-service 写完 Kafka 后立即返回 200 OK，绝不等待推送结果。
+// Kafka 是上行发送与下行推送之间的"防弹衣"，确保发消息永远丝滑。
 message MsgPushEvent {
   // receiver_uuid: 单聊=对端用户 UUID；群聊=群 UUID。
   string receiver_uuid = 1;

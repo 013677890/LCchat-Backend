@@ -1,14 +1,15 @@
 package grpc
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
-	"github.com/013677890/LCchat-Backend/apps/connect/pb"
-	"github.com/013677890/LCchat-Backend/pkg/grpcx"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
 	"net"
 	"os"
 	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
+	"github.com/013677890/LCchat-Backend/apps/connect/pb"
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -147,27 +148,4 @@ func (s *Server) KickConnection(ctx context.Context, req *pb.KickConnectionReque
 	}
 
 	return &pb.KickConnectionResponse{Success: success}, nil
-}
-
-// GetOnlineStatus 获取单个用户的在线设备列表。
-func (s *Server) GetOnlineStatus(_ context.Context, req *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error) {
-	devices := s.connManager.GetOnlineDevices(req.UserUuid)
-	return &pb.GetOnlineStatusResponse{
-		IsOnline:      len(devices) > 0,
-		OnlineDevices: devices,
-	}, nil
-}
-
-// BatchGetOnlineStatus 批量获取多个用户的在线状态。
-func (s *Server) BatchGetOnlineStatus(_ context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error) {
-	items := make([]*pb.UserOnlineStatus, 0, len(req.UserUuids))
-	for _, userUUID := range req.UserUuids {
-		devices := s.connManager.GetOnlineDevices(userUUID)
-		items = append(items, &pb.UserOnlineStatus{
-			UserUuid:      userUUID,
-			IsOnline:      len(devices) > 0,
-			OnlineDevices: devices,
-		})
-	}
-	return &pb.BatchGetOnlineStatusResponse{Items: items}, nil
 }
