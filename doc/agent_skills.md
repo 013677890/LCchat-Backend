@@ -4,11 +4,12 @@ This document captures the development conventions and skills needed to work
 in this project. It is intended for AI agents and new contributors.
 
 ### 1. Tech Stack Overview
-- Go 1.25, layered architecture (gateway + user service)
+- Go 1.25, layered architecture (gateway + user + msg + connect services)
 - gRPC for service-to-service calls
 - Gin for HTTP gateway
 - GORM for database access
-- Redis for cache/token/verification code/rate limit
+- Redis for cache/token/verification code/rate limit/routing table
+- Kafka for async message delivery (msg.push topic)
 - Protobuf + validate rules for request schema
 
 ### 2. Code Structure & Modules
@@ -20,14 +21,18 @@ in this project. It is intended for AI agents and new contributors.
   - **Future Decoupling**: Keep these domains loosely coupled for eventual split
   - **Boundary Rule**: Social domain should not query Core domain tables directly
     (use UUIDs only; aggregate user info via gateway + user-service)
-- `apps/connect/`: WebSocket connection service
+- `apps/connect/`: WebSocket connection service + gRPC push endpoint
   - `internal/svc/connect_service.go`: core types (Session, Envelope), worker pool startup
   - `internal/svc/lifecycle.go`: OnConnect/OnHeartbeat/OnDisconnect, status worker pool
   - `internal/svc/auth.go`: WebSocket token auth (JWT + Redis兜底)
   - `internal/handler/`: Gin WebSocket handler
   - `internal/manager/`: connection registry (online index)
-  - `internal/grpc/`: gRPC server (PushToDevice, KickConnection, etc.)
-- `apps/msg/`: message service (future)
+  - `internal/grpc/`: gRPC server (PushToDevice, PushToUser, BroadcastToUsers, KickConnection)
+  - **架构定位**：纯管道，不对接 Kafka，不做业务判断。上游 Push-Job 查 Redis 路由表后通过 gRPC 精确调用。
+- `apps/msg/`: message service (proto 已定义，业务代码待实现)
+  - Proto: `SendMessage`, `PullMessages`, `RecallMessage`, `GetConversations`, `MarkRead` 等
+  - Kafka: msg-service 落库后写 `MsgPushEvent` 到 `msg.push` topic，立即返回
+  - Push-Job: 消费 Kafka → 查 Redis 路由表 → gRPC 调用 Connect
 - `pkg/`: shared utilities (redis, logger, util, minio)
 - `consts/`: error codes and message map
 - `doc/`: product and API documentation
@@ -139,6 +144,12 @@ in this project. It is intended for AI agents and new contributors.
 
 - `user:apply:pending:{target_uuid}` / ZSet / 24h±随机抖动; 空值5m / `apply_repository` / 待处理好友申请 (member=applicant UUID, score=created_at unix, 空值占位 `__EMPTY__`)
 
+- `user:routing:{user_uuid}` / Hash / 无TTL(由Connect主动维护) / `connect lifecycle` / 在线路由表 (field=device_id, value=Connect节点gRPC地址如"10.0.0.5:9091")
+  - Connect 建连时 HSET，心跳时续期，断连时 HDEL
+  - Push-Job 查询: `HGETALL user:routing:{uuid}` 获取目标所在 Connect 节点
+  - User-Service 查询: `HGET user:routing:{uuid} {device_id}` 用于精确踢线
+  - 在线判断: `HLEN user:routing:{uuid}` > 0 即在线
+
 #### 3.13 Pagination & Versioning
 - 全量初始化接口的 `version` 用 **当前服务器时间**，不要用 `MAX(updated_at)`（避免删除/历史数据导致版本回退）。
 - 只在 **第一页** 计算 `total` 和 `version`，后续页不重复统计，降低 DB 压力。
@@ -222,6 +233,11 @@ in this project. It is intended for AI agents and new contributors.
 - 优先使用批量接口，避免 N+1 gRPC 调用。
 
 #### 3.20 Connect Service Patterns
+- **架构定位（方案B）**：Connect 是纯管道，不对接 Kafka，不做任何业务判断。上游 Push-Job 查 Redis 路由表后通过 gRPC 精确调用。
+- **gRPC 接口**：`PushToDevice` / `PushToUser` / `BroadcastToUsers` / `KickConnection`（实现在 `internal/grpc/server.go`）。
+- **Redis 路由表**：Connect 在建连/心跳时维护 `user:routing:{uuid}` Hash（field=device_id, value=grpc_addr），断连时 HDEL。
+  - Push-Job 通过 HGETALL 查询目标用户所在 Connect 节点、User-Service 通过 HGET 踢线。
+  - 在线判断：`HLEN user:routing:{uuid}` > 0。
 - **WebSocket 生命周期**：`OnConnect` → `OnHeartbeat`(循环) → `OnDisconnect`，由 `lifecycle.go` 实现。
 - **设备状态同步**：channel-based worker pool（64 worker, 8192 queue），异步调用 `UpdateDeviceStatus` RPC。
   - 队列满时丢弃任务（log Warn），不阻塞 WebSocket 处理。
@@ -232,6 +248,20 @@ in this project. It is intended for AI agents and new contributors.
 - **降级策略**：user-service gRPC 不可用时跳过设备状态和活跃时间同步，不影响连接建立。
 - **优雅关闭顺序**：gRPC server → connection manager → status workers → activeSyncer → user gRPC conn → HTTP server。
 - **代码拆分**：`connect_service.go`（核心类型 + 初始化）、`auth.go`（鉴权）、`lifecycle.go`（生命周期 + worker pool）。
+
+#### 3.21 Msg Service Architecture (msg-service + Push-Job)
+- **核心链路**：Gateway HTTP → msg-service gRPC (SendMessage) → Kafka `msg.push` → Push-Job → Redis 路由表 → Connect gRPC → WebSocket。
+- **异步解耦**：msg-service 完成鉴权、分配 Seq、落库后，立即写 Kafka 并返回 200 OK。Kafka 是“防弹衣”。
+- **Push-Job**：独立 Kafka 消费者，职责：
+  1. 解码 MsgPushEvent
+  2. 按 conv_type 判断扩散策略（单聊写扩散 / 群聊读扩散）
+  3. 查 Redis 路由表确定目标 Connect 节点
+  4. gRPC 调用 Connect 投递
+  5. Self-Sync：向发送方其他在线设备同步
+- **Kafka 分区键**：`conv_id`（保证同一会话的消息有序）。
+- **Proto 文件**：`proto/msg/msg_service.proto`、`proto/msg/msg_common.proto`、`proto/msg/msg_push_event.proto`。
+- **Model**：`model/Message.go`、`model/Conversation.go`。
+- **文档**：`doc/message_doc/01~04`。
 
 ### 4. Required Skills for Future Agents
 
