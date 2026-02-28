@@ -38,8 +38,8 @@ message MsgPushEvent {
   ConvType conv_type = 4;
   // data: 按 type 序列化的业务 proto bytes。
   // type="MSG_PUSH"      → MsgItem
-  // type="MSG_RECALL"    → RecallNotice（待定义）
-  // type="MSG_MARK_READ" → MarkReadNotice（待定义）
+  // type="MSG_RECALL"    → RecallNotice
+  // type="MSG_MARK_READ" → MarkReadNotice
   bytes data = 5;
   // trace_id: 链路追踪 ID。
   string trace_id = 6;
@@ -49,5 +49,31 @@ message MsgPushEvent {
   // Connect 消费后用于多端同步：向 from_uuid 下除 device_id 以外的在线设备也投递一份，
   // 实现发送方其他终端实时看到自己发出的消息。
   string from_uuid = 8;
+}
+
+// RecallNotice 撤回通知。
+// 由 msg-service 在撤回成功后写入 Kafka，Push-Job 消费后封装为
+// MessageEnvelope{type="MSG_RECALL"} 推送到会话内所有在线设备。
+// 客户端收到后将对应消息气泡替换为"xxx 撤回了一条消息"。
+message RecallNotice {
+  // conv_id: 会话 ID。
+  string conv_id = 1;
+  // msg_id: 被撤回的消息 ID。
+  string msg_id = 2;
+  // operator: 撤回操作者 UUID（可能是发送者本人或群管理员）。
+  string operator = 3;
+  // recall_time: 撤回时间（unix 毫秒）。
+  int64 recall_time = 4;
+}
+
+// MarkReadNotice 已读同步通知（多端同步）。
+// 由 msg-service 在 MarkRead 成功后写入 Kafka，Push-Job 消费后封装为
+// MessageEnvelope{type="MSG_MARK_READ"} 推送到该用户的其他在线设备。
+// 各端据此同步清除红点。
+message MarkReadNotice {
+  // conv_id: 会话 ID。
+  string conv_id = 1;
+  // read_seq: 已读到的最大 seq。
+  int64 read_seq = 2;
 }
 

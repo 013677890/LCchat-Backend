@@ -97,7 +97,12 @@ in this project. It is intended for AI agents and new contributors.
 - 1xxxx: client errors (param/body/too many requests)
 - 2xxxx: auth errors (token/permission)
 - 11xxx: user module errors (email/password/verify code)
-- 12xxx+: other modules (friend, message, group, device, blacklist)
+- 12xxx: friend module errors (already friend, apply not found)
+- 13xxx: message module errors (send fail, recall timeout/no permission, duplicate)
+- 14xxx: group module errors
+- 15xxx: device session errors
+- 16xxx: blacklist errors
+- 17xxx: connect module errors
 - 3xxxx: server errors (internal, timeout, unavailable)
 
 #### 3.9 Config & Runtime
@@ -149,6 +154,9 @@ in this project. It is intended for AI agents and new contributors.
   - Push-Job 查询: `HGETALL user:routing:{uuid}` 获取目标所在 Connect 节点
   - User-Service 查询: `HGET user:routing:{uuid} {device_id}` 用于精确踢线
   - 在线判断: `HLEN user:routing:{uuid}` > 0 即在线
+
+- `msg:seq:{conv_id}` / String(INCR) / 无TTL / `seq_repository` / 会话内 seq 原子分配
+- `msg:idempotent:{from_uuid}:{device_id}:{client_msg_id}` / String(JSON) / 10min / `msg_repository` / 消息幂等缓存（防弱网重发）
 
 #### 3.13 Pagination & Versioning
 - 全量初始化接口的 `version` 用 **当前服务器时间**，不要用 `MAX(updated_at)`（避免删除/历史数据导致版本回退）。
@@ -259,8 +267,13 @@ in this project. It is intended for AI agents and new contributors.
   4. gRPC 调用 Connect 投递
   5. Self-Sync：向发送方其他在线设备同步
 - **Kafka 分区键**：`conv_id`（保证同一会话的消息有序）。
-- **Proto 文件**：`proto/msg/msg_service.proto`、`proto/msg/msg_common.proto`、`proto/msg/msg_push_event.proto`。
+- **Proto 文件**：
+  - `proto/msg/msg_service.proto`：7 个 RPC（SendMessage / PullMessages / GetMessagesByIds / RecallMessage / GetConversations / MarkRead / DeleteConversation / UpdateConversationSettings）
+  - `proto/msg/msg_common.proto`：`MsgItem`、`ConversationItem`、`ConvType` 枚举
+  - `proto/msg/msg_push_event.proto`：`MsgPushEvent`、`RecallNotice`、`MarkReadNotice`
 - **Model**：`model/Message.go`、`model/Conversation.go`。
+- **Redis Key**：`msg:seq:{conv_id}`（seq 分配）、`msg:idempotent:{from}:{device}:{client_msg_id}`（幂等缓存 10min）。
+- **错误码 (13xxx)**：13001~13008（基础消息/会话错误）、13009（撤回超时）、13010（撤回无权限）、13011（消息重复/幂等命中）。
 - **文档**：`doc/message_doc/01~04`。
 
 ### 4. Required Skills for Future Agents

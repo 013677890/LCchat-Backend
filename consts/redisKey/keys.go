@@ -139,3 +139,24 @@ func GatewayUserRateLimitKey(userUUID string) string {
 func GatewayIPRateLimitKey(ip string) string {
 	return fmt.Sprintf("rate:limit:ip:%s", ip)
 }
+
+// ==================== Msg-Service Key 构造函数 ====================
+
+const (
+	// MsgIdempotentTTL 消息幂等缓存 TTL（防止弱网重发）
+	MsgIdempotentTTL = 10 * time.Minute
+)
+
+// MsgSeqKey 会话内 seq 分配 Key: msg:seq:{conv_id}
+// 数据类型: String (Redis INCR)
+// TTL: 无（永久存在，随会话生命周期）
+func MsgSeqKey(convId string) string {
+	return fmt.Sprintf("msg:seq:%s", convId)
+}
+
+// MsgIdempotentKey 消息幂等缓存 Key: msg:idempotent:{from_uuid}:{device_id}:{client_msg_id}
+// 数据类型: String (JSON, 首次发送结果)
+// TTL: 10min
+func MsgIdempotentKey(fromUuid, deviceId, clientMsgId string) string {
+	return fmt.Sprintf("msg:idempotent:%s:%s:%s", fromUuid, deviceId, clientMsgId)
+}
