@@ -31,3 +31,4 @@ func NewMarkReadWorkflow(
 }
 
 // TODO: 实现 Execute(ctx context.Context, req *pb.MarkReadRequest) (*pb.MarkReadResponse, error)
+// 等 protoc 重跑生成 MsgPushEvent 后再实现 Kafka 投递部分
